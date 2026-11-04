@@ -217,7 +217,12 @@ function renderTab(){
 }
 
 /* ===== แดชบอร์ด ===== */
-function currentAttempt(pid, kind){ return attempts.find(a => a.participant_id === pid && a.kind === kind && !a.unlocked) || null; }
+// ผลที่ "นับ" = ครั้งล่าสุดที่ไม่ถูกปลดล็อก (โหมดล็อกมีได้ครั้งเดียว / โหมดทำซ้ำได้มีหลายครั้ง ใช้ครั้งล่าสุด)
+function currentAttempt(pid, kind){
+  const l = attempts.filter(a => a.participant_id === pid && a.kind === kind && !a.unlocked)
+    .sort((a, b) => b.submitted_at.localeCompare(a.submitted_at));
+  return l[0] || null;
+}
 function lastUnlocked(pid, kind){
   const l = attempts.filter(a => a.participant_id === pid && a.kind === kind && a.unlocked).sort((a, b) => b.submitted_at.localeCompare(a.submitted_at));
   return l[0] || null;
@@ -227,7 +232,8 @@ function scoreCell(pid, kind){
   const a = currentAttempt(pid, kind);
   if(a){
     const badge = kind === 'post' ? (a.passed ? ' <span class="tag ok">ผ่าน</span>' : ' <span class="tag no">ไม่ผ่าน</span>') : '';
-    return `${a.score}/${a.total}${badge}`;
+    const n = attemptCount(pid, kind);
+    return `${a.score}/${a.total}${badge}${n > 1 ? ` <span class="muted">(ครั้งที่ ${n})</span>` : ''}`;
   }
   const u = lastUnlocked(pid, kind);
   return u ? `<span class="tag wait">ปลดล็อกแล้ว (เดิม ${u.score}/${u.total})</span>` : '<span class="muted">—</span>';
@@ -264,7 +270,7 @@ function dashHtml(){
   if(kind === 'post' && openFail){
     h += `<h3 style="margin-top:12px">ไม่ผ่านเกณฑ์ (${failList.length})</h3>` + (failList.length ? `<table><thead><tr><th>ชื่อ</th><th>คะแนน</th><th>ครั้งที่</th><th></th></tr></thead><tbody>` +
       failList.map(p => { const a = currentAttempt(p.id, 'post'); return `<tr><td>${esc(p.full_name)}</td><td>${a.score}/${a.total}</td><td>${attemptCount(p.id, 'post')}</td>
-        <td class="row"><button class="btn ghost sm" onclick="showAttempt('${a.id}')">ดูข้อที่ผิด</button><button class="btn red sm" onclick="unlock('${a.id}')">ปลดล็อกให้ทำใหม่</button></td></tr>`; }).join('') + '</tbody></table>' : '<p class="muted">ไม่มีผู้ไม่ผ่าน</p>');
+        <td class="row"><button class="btn ghost sm" onclick="showAttempt('${a.id}')">ดูข้อที่ผิด</button>${cur.post_repeat ? '<span class="muted">ทำซ้ำได้เอง</span>' : `<button class="btn red sm" onclick="unlock('${a.id}')">ปลดล็อกให้ทำใหม่</button>`}</td></tr>`; }).join('') + '</tbody></table>' : '<p class="muted">ไม่มีผู้ไม่ผ่าน</p>');
   }
   h += '</div>';
 
@@ -274,7 +280,7 @@ function dashHtml(){
       const latest = [pre, post].filter(Boolean).sort((a, b) => b.submitted_at.localeCompare(a.submitted_at))[0];
       let act = '';
       if(pre) act += `<button class="btn ghost sm" onclick="showAttempt('${pre.id}')">ดู Pre</button> `;
-      if(post) act += `<button class="btn ghost sm" onclick="showAttempt('${post.id}')">ดู Post</button> ` + (!post.passed ? `<button class="btn red sm" onclick="unlock('${post.id}')">ปลดล็อก Post</button>` : '');
+      if(post) act += `<button class="btn ghost sm" onclick="showAttempt('${post.id}')">ดู Post</button> ` + (!post.passed && !cur.post_repeat ? `<button class="btn red sm" onclick="unlock('${post.id}')">ปลดล็อก Post</button>` : '');
       return `<tr><td>${esc(p.emp_id)}</td><td>${esc(p.full_name)}</td><td>${esc(p.unit)}</td><td>${scoreCell(p.id, 'pre')}</td><td>${scoreCell(p.id, 'post')}</td><td>${latest ? fmtT(latest.submitted_at) : ''}</td><td>${act}</td></tr>`;
     }).join('') + '</tbody></table></div></div>';
   return h;
@@ -320,6 +326,14 @@ function exportExcel(){
       post ? `${post.score}/${post.total}` : '', post ? (post.passed ? 'ผ่าน' : 'ไม่ผ่าน') : '', post ? fmtT(post.submitted_at) : '', attemptCount(p.id, 'post') || '']);
   });
   XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(sum), 'สรุปผล');
+  const hist = [['รหัสพนักงาน','ชื่อ-นามสกุล','ชนิด','ครั้งที่','คะแนน','เต็ม','ผล','เวลาส่ง']];
+  people.forEach(p => ['pre', 'post'].forEach(kind => {
+    attempts.filter(a => a.participant_id === p.id && a.kind === kind)
+      .sort((a, b) => a.submitted_at.localeCompare(b.submitted_at))
+      .forEach((a, i) => hist.push([p.emp_id, p.full_name, kind === 'pre' ? 'Pre' : 'Post', i + 1, a.score, a.total,
+        kind === 'post' ? (a.passed ? 'ผ่าน' : 'ไม่ผ่าน') : '', fmtT(a.submitted_at)]));
+  }));
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(hist), 'ประวัติทุกครั้ง');
   ['pre', 'post'].forEach(kind => {
     const rows = [['รหัสพนักงาน', 'ชื่อ-นามสกุล', ...questions.map((_, i) => 'ข้อ ' + (i + 1)), 'คะแนน']];
     people.forEach(p => {
@@ -505,6 +519,10 @@ function settingsHtml(){
     <div class="card"><h2>เปิด/ปิดการทำแบบทดสอบ</h2>
       <label class="row"><input type="checkbox" ${cur.pre_open ? 'checked' : ''} onchange="setOpen('pre_open',this.checked)"> เปิด Pre-test</label>
       <label class="row" style="margin-top:6px"><input type="checkbox" ${cur.post_open ? 'checked' : ''} onchange="setOpen('post_open',this.checked)"> เปิด Post-test (เปิดตอนจบการอบรม)</label></div>
+    <div class="card"><h2>การทำซ้ำ Post-test</h2>
+      <label class="row"><input type="radio" name="rep" ${!cur.post_repeat ? 'checked' : ''} onchange="setOpen('post_repeat',false)"> ล็อก — ทำได้ครั้งเดียว (ผู้ไม่ผ่านต้องให้แอดมินปลดล็อก)</label>
+      <label class="row" style="margin-top:6px"><input type="radio" name="rep" ${cur.post_repeat ? 'checked' : ''} onchange="setOpen('post_repeat',true)"> ทำซ้ำได้ไม่จำกัด (แม้ผ่านแล้ว) — คะแนนที่นับคือครั้งล่าสุด เก็บประวัติทุกครั้ง</label>
+      <p class="muted">มีผลกับ Post-test เท่านั้น Pre-test ล็อกทำได้ครั้งเดียวเสมอ · โหมดทำซ้ำได้จะแสดงผลรายข้อทุกครั้ง</p></div>
     <div class="card"><h2>ข้อมูลและเกณฑ์</h2>
       <label class="f">ชื่อหลักสูตร</label><input type="text" id="s_title" value="${esc(cur.title)}">
       <div class="grid2"><div><label class="f">เลขที่หลักสูตร</label><input type="text" id="s_no" value="${esc(cur.course_no)}"></div><div><label class="f">รุ่น</label><input type="text" id="s_batch" value="${esc(cur.batch)}"></div>
