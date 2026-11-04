@@ -33,7 +33,12 @@ input[type=text]:focus{outline:none;border-color:var(--blue)}
 .kv{display:grid;grid-template-columns:90px 1fr;gap:6px 10px;margin:10px 0}
 .kv b{color:var(--muted);font-weight:600}
 .q{background:#fff;border:1px solid var(--line);border-radius:12px;padding:16px;margin-bottom:12px}
-.q .qt{font-weight:600;margin-bottom:10px}
+.q .qt{font-weight:600;margin-bottom:12px;background:#e6eefa;border-left:5px solid var(--blue);border-radius:8px;padding:11px 13px}
+.mback{position:fixed;inset:0;background:rgba(10,20,40,.55);display:flex;align-items:center;justify-content:center;padding:18px;z-index:100}
+.mbox{background:#fff;border-radius:14px;max-width:380px;width:100%;padding:22px;box-shadow:0 20px 60px rgba(0,0,0,.3)}
+.mbox h3{margin:0 0 8px;font-size:18px;color:var(--navy)}
+.mbox p{margin:0 0 6px;color:#394556}
+.mbox .warn{background:#fff6e0;color:#9c6200;border:1px solid #f0dca8;border-radius:8px;padding:8px 10px;margin-top:8px;font-weight:600}
 .opt{display:flex;gap:10px;align-items:flex-start;padding:10px 12px;border:2px solid var(--line);border-radius:10px;margin-bottom:8px;cursor:pointer}
 .opt input{margin-top:5px;flex:0 0 auto}
 .opt.sel{border-color:var(--blue);background:#eef5ff}
@@ -95,7 +100,7 @@ async function init(){
   S = data;
   document.title = 'แบบทดสอบ ' + S.title;
   document.getElementById('hTitle').textContent = S.title;
-  document.getElementById('hSub').textContent = [S.batch ? 'รุ่นที่ ' + S.batch : '', S.course_no ? 'เลขที่ ' + S.course_no : ''].filter(Boolean).join(' · ');
+  document.getElementById('hSub').textContent = [S.batch ? 'รุ่นที่ ' + S.batch : '', S.course_no ? 'เลขที่หลักสูตร ' + S.course_no : ''].filter(Boolean).join(' · ');
   viewPickKind();
 }
 
@@ -103,9 +108,9 @@ async function init(){
 function viewPickKind(){
   show(`<div class="card">
     <h2>เลือกแบบทดสอบ</h2>
-    <p class="muted">จำนวน ${esc(S.question_count)} ข้อ · ทำได้ครั้งเดียว · ไม่จับเวลา</p>
+    <p class="muted">จำนวน ${esc(S.question_count)} ข้อ</p>
     <button class="btn" ${S.pre_open?'':'disabled'} onclick="pickKind('pre')">📝 ${KIND_TH.pre}${S.pre_open?'':' (ยังไม่เปิด)'}</button>
-    <button class="btn ghost" ${S.post_open?'':'disabled'} onclick="pickKind('post')">✅ ${KIND_TH.post}${S.post_open?'':' (ยังไม่เปิด)'}</button>
+    ${S.post_open ? `<button class="btn ghost" onclick="pickKind('post')">✅ ${KIND_TH.post}</button>` : ''}
   </div>`);
 }
 async function pickKind(k){
@@ -113,7 +118,7 @@ async function pickKind(k){
   show('<div class="card muted">กำลังโหลดรายชื่อ...</div>');
   const { data, error } = await sb.rpc('exam_list_participants', { p_session: SESSION_ID });
   if(error){ show(`<div class="err">${esc(errText(error))}</div><button class="btn ghost" onclick="viewPickKind()">กลับ</button>`); return; }
-  people = data || [];
+  people = (data || []).slice().sort((a, b) => String(a.emp_id).localeCompare(String(b.emp_id), 'th', { numeric: true }));
   viewPickName();
 }
 
@@ -158,7 +163,7 @@ function pickPerson(id){
       <b>แบบทดสอบ</b><div>${KIND_TH[kind]}</div>
     </div>
     ${done ? `<div class="err">${esc(ERR_TH.LOCKED)}</div>` : '<p class="muted">เมื่อกดส่งคำตอบแล้ว จะไม่สามารถแก้ไขหรือทำซ้ำได้</p>'}
-    <button class="btn green" ${done?'disabled':''} onclick="startExam()">ใช่ ฉันคือคนนี้ เริ่มทำแบบทดสอบ</button>
+    <button class="btn green" ${done?'disabled':''} onclick="startExam()">ใช่ ข้อมูลถูกต้อง เริ่มทำแบบทดสอบ</button>
     <button class="btn ghost" onclick="viewPickName()">ไม่ใช่ เลือกใหม่</button>
   </div>`);
 }
@@ -201,12 +206,29 @@ function updateProgress(){
   document.getElementById('cnt').textContent = `ตอบแล้ว ${done}/${total} ข้อ`;
 }
 
+/* ===== ป๊อปอัปยืนยัน (แทน confirm ของเบราว์เซอร์) ===== */
+function confirmModal(title, bodyHtml, okText){
+  return new Promise(resolve => {
+    const m = document.createElement('div');
+    m.className = 'mback';
+    m.innerHTML = `<div class="mbox"><h3>${esc(title)}</h3><p>${bodyHtml}</p>
+      <button class="btn green" id="mOk">${esc(okText || 'ตกลง')}</button>
+      <button class="btn ghost" id="mNo">กลับไปตรวจคำตอบ</button></div>`;
+    document.body.appendChild(m);
+    const done = v => { m.remove(); resolve(v); };
+    m.querySelector('#mOk').onclick = () => done(true);
+    m.querySelector('#mNo').onclick = () => done(false);
+  });
+}
+
 /* ===== 5) ส่งคำตอบ ===== */
 async function submitExam(){
   if(submitting) return;
   const total = exam.questions.length, left = total - Object.keys(answers).length;
-  if(left > 0 && !confirm(`ยังไม่ได้ตอบ ${left} ข้อ (จะนับเป็นข้อผิด) ต้องการส่งเลยหรือไม่?`)) return;
-  if(!confirm('ยืนยันส่งคำตอบ? ส่งแล้วแก้ไขหรือทำซ้ำไม่ได้')) return;
+  const ok = await confirmModal('ยืนยันส่งคำตอบ?',
+    'ส่งแล้วจะแก้ไขหรือทำซ้ำไม่ได้' + (left > 0 ? `<div class="warn">ยังไม่ได้ตอบ ${left} ข้อ (จะนับเป็นข้อผิด)</div>` : ''),
+    left > 0 ? 'ส่งเลย' : 'ยืนยันส่ง');
+  if(!ok) return;
   submitting = true;
   const btn = document.getElementById('btnSubmit');
   btn.disabled = true; btn.textContent = 'กำลังส่ง...';
@@ -227,7 +249,7 @@ function viewResult(r){
     show(`<div class="card score">
       <div class="muted">คะแนน Pre-test ของ ${esc(me.full_name)}</div>
       <div class="big">${r.score}<span style="font-size:24px"> / ${r.total}</span></div>
-      <p class="muted">บันทึกผลเรียบร้อยแล้ว ขอบคุณที่ทำแบบทดสอบ<br>แบบทดสอบนี้ไม่เฉลยคำตอบ</p>
+      <p class="muted">บันทึกผลเรียบร้อยแล้ว ขอบคุณที่ทำแบบทดสอบ</p>
     </div>`);
     return;
   }
@@ -236,16 +258,17 @@ function viewResult(r){
   const rows = exam.questions.map((q, n) => {
     const ok = !!resByPos[q.position];
     const t = q.question.length > 70 ? q.question.slice(0, 70) + '…' : q.question;
-    return `<div class="res ${ok?'c':'w'}"><div class="mark">${ok?'✓':'✗'}</div><div>ข้อ ${n+1}. ${esc(t)}</div></div>`;
+    const k = q.order.indexOf(answers[q.id]);   // ตำแหน่งตัวเลือกที่ผู้ทำเห็นบนจอ
+    const note = ok && k >= 0 ? `<br><small style="color:var(--green);font-weight:600">ถูกต้อง: ตัวเลือก ${LETTERS[k]}</small>` : '';
+    return `<div class="res ${ok?'c':'w'}"><div class="mark">${ok?'✓':'✗'}</div><div>ข้อ ${n+1}. ${esc(t)}${note}</div></div>`;
   }).join('');
   show(`<div class="card score">
       <div class="muted">คะแนน Post-test ของ ${esc(me.full_name)}</div>
       <div class="big">${r.score}<span style="font-size:24px"> / ${r.total}</span></div>
       <div class="badge ${r.passed?'ok':'no'}">${r.passed ? '🎉 คุณผ่านเกณฑ์' : 'ยังไม่ผ่านเกณฑ์'}</div>
-      <p class="muted">เกณฑ์ผ่าน ${esc(r.pass_percent)}%${r.passed ? '' : '<br>โปรดแจ้งผู้ดูแลหากต้องการทำใหม่'}</p>
+      <p class="muted">เกณฑ์ผ่าน ${esc(r.pass_percent)}%</p>
     </div>
-    <div class="card"><h2>ผลรายข้อ</h2>${rows}
-      <p class="muted" style="margin-top:10px">ข้อที่ผิดจะไม่เฉลยตัวเลือกที่ถูกต้อง</p></div>`);
+    <div class="card"><h2>ผลรายข้อ</h2>${rows}</div>`);
 }
 
 init();
