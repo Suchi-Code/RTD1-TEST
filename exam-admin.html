@@ -168,7 +168,9 @@ async function loadAll(){
     sb.from('exam_participants').select('*').eq('session_id', id).order('full_name'),
     sb.from('exam_attempts').select('*').eq('session_id', id).range(0, 9999),
   ]);
-  questions = qs.data || []; people = pp.data || []; attempts = at.data || [];
+  questions = qs.data || [];
+  people = (pp.data || []).slice().sort((a, b) => String(a.emp_id).localeCompare(String(b.emp_id), 'th', { numeric: true }));   // เรียงตามรหัสพนักงาน
+  attempts = at.data || [];
   keys = {};
   if(questions.length){
     const { data: ks } = await sb.from('exam_answer_keys').select('*').in('question_id', questions.map(q => q.id));
@@ -271,7 +273,7 @@ function dashHtml(){
       const pre = currentAttempt(p.id, 'pre'), post = currentAttempt(p.id, 'post');
       const latest = [pre, post].filter(Boolean).sort((a, b) => b.submitted_at.localeCompare(a.submitted_at))[0];
       let act = '';
-      if(pre) act += `<button class="btn ghost sm" onclick="showAttempt('${pre.id}')">ดู Pre</button> <button class="btn red sm" onclick="unlock('${pre.id}')">ปลดล็อก Pre</button> `;
+      if(pre) act += `<button class="btn ghost sm" onclick="showAttempt('${pre.id}')">ดู Pre</button> `;
       if(post) act += `<button class="btn ghost sm" onclick="showAttempt('${post.id}')">ดู Post</button> ` + (!post.passed ? `<button class="btn red sm" onclick="unlock('${post.id}')">ปลดล็อก Post</button>` : '');
       return `<tr><td>${esc(p.emp_id)}</td><td>${esc(p.full_name)}</td><td>${esc(p.unit)}</td><td>${scoreCell(p.id, 'pre')}</td><td>${scoreCell(p.id, 'post')}</td><td>${latest ? fmtT(latest.submitted_at) : ''}</td><td>${act}</td></tr>`;
     }).join('') + '</tbody></table></div></div>';
