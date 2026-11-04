@@ -141,9 +141,15 @@ function renderPeople(){
   if(!list.length){ box.innerHTML = '<p class="muted">ไม่พบรายชื่อที่ค้นหา</p>'; return; }
   box.innerHTML = list.slice(0, 80).map(p => {
     const done = kind === 'pre' ? p.pre_done : p.post_done;
+    let tagHtml = '';
+    if(kind === 'post' && S.post_repeat){
+      if(p.post_done) tagHtml = p.post_passed ? '<span class="tag">ผ่านแล้ว</span>' : '<span class="tag warn">ยังไม่ผ่าน</span>';
+    } else if(done){
+      tagHtml = '<span class="tag warn">ทำแล้ว</span>';
+    }
     return `<div class="pitem" onclick="pickPerson('${esc(p.id)}')">
       <div><b>${esc(p.full_name)}</b><br><small>${esc(p.emp_id)}${p.unit ? ' · ' + esc(p.unit) : ''}</small></div>
-      ${done ? '<span class="tag warn">ทำแล้ว</span>' : ''}
+      ${tagHtml}
     </div>`;
   }).join('') + (list.length > 80 ? '<p class="muted">แสดง 80 รายการแรก พิมพ์เพิ่มเพื่อกรอง</p>' : '');
 }
@@ -152,7 +158,10 @@ function renderPeople(){
 function pickPerson(id){
   me = people.find(p => p.id === id);
   if(!me) return;
-  const done = kind === 'pre' ? me.pre_done : me.post_done;
+  const repeatMode = kind === 'post' && S.post_repeat;
+  const done = (kind === 'pre' ? me.pre_done : me.post_done) && !repeatMode;   // โหมดทำซ้ำได้ ไม่ล็อก
+  const prevNote = repeatMode && me.post_done
+    ? `<div class="warn" style="background:#fff6e0;color:#9c6200;border:1px solid #f0dca8;border-radius:8px;padding:10px;margin:8px 0">คุณเคยทำแบบทดสอบนี้แล้ว (${me.post_passed ? 'ผ่านแล้ว' : 'ยังไม่ผ่าน'}) สามารถทำซ้ำได้</div>` : '';
   show(`<div class="card">
     <h2>ยืนยันว่าเป็นคุณ</h2>
     <div class="kv">
@@ -268,7 +277,8 @@ function viewResult(r){
       <div class="badge ${r.passed?'ok':'no'}">${r.passed ? '🎉 คุณผ่านเกณฑ์' : 'ยังไม่ผ่านเกณฑ์'}</div>
       <p class="muted">เกณฑ์ผ่าน ${esc(r.pass_percent)}%</p>
     </div>
-    <div class="card"><h2>ผลรายข้อ</h2>${rows}</div>`);
+    <div class="card"><h2>ผลรายข้อ</h2>${rows}</div>
+    ${S.post_repeat ? '<button class="btn" onclick="startExam()">ทำแบบทดสอบอีกครั้ง</button>' : ''}`);
 }
 
 init();
