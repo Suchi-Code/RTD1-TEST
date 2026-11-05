@@ -276,9 +276,10 @@ function viewResult(r){
       <div class="big">${r.score}<span style="font-size:24px"> / ${r.total}</span></div>
       <div class="badge ${r.passed?'ok':'no'}">${r.passed ? '🎉 คุณผ่านเกณฑ์' : 'ยังไม่ผ่านเกณฑ์'}</div>
       <p class="muted">เกณฑ์ผ่าน ${esc(r.pass_percent)}%</p>
+      ${(!r.passed && S.post_repeat) ? '<button class="btn" onclick="startExam()">🔄 ทำแบบทดสอบอีกครั้ง</button>' : ''}
     </div>
     <div class="card"><h2>ผลรายข้อ</h2>${rows}</div>
-    ${S.post_repeat ? '<button class="btn" onclick="startExam()">ทำแบบทดสอบอีกครั้ง</button>' : ''}`);
+    ${(!r.passed && S.post_repeat) ? '<button class="btn" onclick="startExam()">🔄 ทำแบบทดสอบอีกครั้ง</button>' : ''}`);
 }
 
 init();
