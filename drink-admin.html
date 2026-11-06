@@ -1,0 +1,562 @@
+<!doctype html>
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>แอดมินสั่งเครื่องดื่ม</title>
+<link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;500;600;700&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+<style>
+:root{--navy:#0f2744;--blue:#1d5fa8;--bg:#f3f6f8;--line:#dde3ea;--green:#1a7a4a;--red:#b03030;--amber:#9c6200;--muted:#627587}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:#1e2533;font-family:'Sarabun',sans-serif;font-size:15px;line-height:1.5}
+header{background:var(--navy);color:#fff;padding:12px 20px;display:flex;justify-content:space-between;align-items:center;gap:12px}
+header h1{margin:0;font-size:16px}
+header .r{display:flex;gap:8px;align-items:center;font-size:13px}
+main{max-width:1100px;margin:0 auto;padding:18px 16px 60px}
+.card{background:#fff;border:1px solid var(--line);border-radius:12px;padding:16px;margin-bottom:14px}
+h2{margin:0 0 10px;font-size:18px;color:var(--navy)}
+h3{margin:0 0 8px;font-size:15px;color:var(--navy)}
+.muted{color:var(--muted);font-size:13px}
+.btn{border:none;border-radius:8px;padding:8px 14px;font:inherit;font-weight:600;cursor:pointer;background:var(--blue);color:#fff}
+.btn:hover{filter:brightness(.92)} .btn:disabled{background:#b8c4d0;cursor:not-allowed}
+.btn.ghost{background:#fff;color:var(--blue);border:1.5px solid var(--blue)}
+.btn.red{background:#fdeeea;color:var(--red);border:1px solid #f3c7cf}
+.btn.green{background:var(--green)}
+.btn.sm{padding:4px 10px;font-size:13px}
+input[type=text],input[type=password],input[type=date],textarea,select{width:100%;padding:8px 10px;border:1.5px solid var(--line);border-radius:8px;font:inherit;background:#fff}
+input:focus,textarea:focus,select:focus{outline:none;border-color:var(--blue)}
+label.f{display:block;font-size:12px;font-weight:700;color:var(--muted);margin:10px 0 3px}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:10px 14px}
+.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.tabs{display:flex;gap:4px;margin-bottom:14px;flex-wrap:wrap}
+.tab{padding:9px 16px;border-radius:8px;border:1px solid var(--line);background:#fff;cursor:pointer;font-weight:600;color:var(--muted)}
+.tab.on{background:var(--blue);border-color:var(--blue);color:#fff}
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin:12px 0}
+.stat{background:#f7fafc;border:1px solid var(--line);border-radius:10px;padding:12px}
+.stat .n{font-size:26px;font-weight:700;color:var(--navy);line-height:1.2}
+.stat .l{font-size:12px;color:var(--muted)}
+.stat.click{cursor:pointer;border-color:#9fc6e0}
+.stat.click:hover{background:#eef6fc}
+table{width:100%;border-collapse:collapse;font-size:14px}
+th{background:var(--navy);color:#fff;padding:8px 10px;text-align:left;white-space:nowrap}
+td{padding:7px 10px;border-bottom:1px solid #eef1f4;vertical-align:middle}
+.tag{font-size:12px;font-weight:700;padding:2px 9px;border-radius:99px;white-space:nowrap;display:inline-block}
+.tag.ok{background:#e3f7ee;color:#178a5c} .tag.no{background:#fdeeea;color:var(--red)} .tag.wait{background:#fff2d8;color:var(--amber)} .tag.gray{background:#eef0f4;color:var(--muted)}
+.chip{display:inline-block;background:#eef5ff;color:var(--blue);border-radius:99px;padding:2px 10px;margin:2px 4px 2px 0;font-size:13px;font-weight:600}
+.err{background:#fdeeea;color:var(--red);border:1px solid #f3c7cf;border-radius:8px;padding:10px;margin:10px 0}
+.warn{background:#fff6e0;color:var(--amber);border:1px solid #f0dca8;border-radius:8px;padding:10px;margin:10px 0}
+.toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:#1f2937;color:#fff;padding:10px 20px;border-radius:8px;z-index:99;font-weight:600}
+.linkbox{background:#f0f4f8;border:1px dashed #9fb4c8;border-radius:8px;padding:10px;word-break:break-all;font-size:13px}
+.hide{display:none}
+.daybar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:8px}
+.daybar input[type=date]{width:auto}
+@media(max-width:700px){.grid2{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<header><h1>🥤 แอดมินสั่งเครื่องดื่ม</h1><div class="r" id="hRight"></div></header>
+<main id="app"><div class="card muted">กำลังโหลด...</div></main>
+
+<script>
+/* ===== Supabase (บัญชีและสิทธิ์ชุดเดียวกับ exam-admin) ===== */
+const SUPABASE_URL = 'https://dcaydbxyjisegqzzildq.supabase.co';
+const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImRjYXlkYnh5amlzZWdxenppbGRxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODQ2OTk5NDgsImV4cCI6MjEwMDI3NTk0OH0.cEk8k90NeTTnkZV0Sny7nuN8UbW15_eW8S_HTQSBwwA';
+const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+const $ = id => document.getElementById(id);
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const fmtT = t => t ? new Date(t).toLocaleString('th-TH', { dateStyle: 'short', timeStyle: 'short' }) : '';
+const fmtHM = t => t ? new Date(t).toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' }) : '';
+function toast(m){ const t = document.createElement('div'); t.className = 'toast'; t.textContent = m; document.body.appendChild(t); setTimeout(() => t.remove(), 2600); }
+function thaiDate(iso, style){
+  const [y, m, d] = String(iso || '').split('-').map(Number);
+  if(!y) return '';
+  return new Date(y, m - 1, d).toLocaleDateString('th-TH', { dateStyle: style || 'full' });
+}
+
+/* ===== state ===== */
+let user = null, view = 'events', tab = 'dash';
+let events = [], cur = null;
+let menu = [], sweet = [];
+let people = [], orders = [], examSessions = [];
+let todayStr = '', day = '';
+let openPending = false, editingMenu = null, editingSweet = null, editingPerson = null, pSearch = '';
+let channel = null, pollTimer = null, reloadTimer = null, rtStatus = '';
+
+/* ===== login ===== */
+async function boot(){
+  const { data: { session } } = await sb.auth.getSession();
+  if(session) await afterLogin(session.user); else viewLogin();
+}
+function viewLogin(msg){
+  $('hRight').innerHTML = '';
+  $('app').innerHTML = `<div class="card" style="max-width:420px;margin:40px auto">
+    <h2>เข้าสู่ระบบแอดมิน</h2>
+    <label class="f">อีเมล หรือ รหัสพนักงาน</label><input type="text" id="lu" autocomplete="username">
+    <label class="f">รหัสผ่าน</label><input type="password" id="lp" autocomplete="current-password" onkeydown="if(event.key==='Enter')doLogin()">
+    ${msg ? `<div class="err">${esc(msg)}</div>` : ''}
+    <button class="btn" style="width:100%;margin-top:14px" onclick="doLogin()">เข้าสู่ระบบ</button>
+    <p class="muted">ใช้บัญชีเดียวกับแอดมินแบบทดสอบ Pre/Post</p></div>`;
+}
+async function doLogin(){
+  let u = $('lu').value.trim(); const p = $('lp').value;
+  if(!u || !p) return;
+  if(!u.includes('@')) u += '@trainfin.local';
+  const { data, error } = await sb.auth.signInWithPassword({ email: u, password: p });
+  if(error){ viewLogin('เข้าสู่ระบบไม่สำเร็จ: ' + error.message); return; }
+  await afterLogin(data.user);
+}
+async function afterLogin(u){
+  const { data } = await sb.from('exam_admins').select('user_id').eq('user_id', u.id).maybeSingle();
+  if(!data){ await sb.auth.signOut(); viewLogin('บัญชีนี้ไม่มีสิทธิ์แอดมิน (ยังไม่ได้เพิ่มใน exam_admins)'); return; }
+  user = u;
+  $('hRight').innerHTML = `<span>${esc(u.email)}</span><button class="btn ghost sm" style="background:transparent;color:#fff;border-color:#fff" onclick="doLogout()">ออกจากระบบ</button>`;
+  const r = await sb.rpc('drink_today');
+  todayStr = (r && r.data) ? String(r.data) : new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Bangkok' });
+  await go('events');
+}
+async function doLogout(){ leaveEvent(); await sb.auth.signOut(); user = null; viewLogin(); }
+
+/* ===== โครงหน้า + เมนูนำทาง ===== */
+function shell(){ $('app').innerHTML = '<div class="tabs" id="nav"></div><div id="view"></div>'; }
+function renderNav(){
+  $('nav').innerHTML = [['events', '📋 รายการสั่งน้ำ'], ['menu', '🥤 เมนูและความหวาน']].map(([k, l]) =>
+    `<div class="tab ${(view === k || (view === 'detail' && k === 'events')) ? 'on' : ''}" onclick="go('${k}')">${l}</div>`).join('');
+}
+async function go(v){
+  leaveEvent(); view = v; shell(); renderNav();
+  $('view').innerHTML = '<div class="card muted">กำลังโหลด...</div>';
+  if(v === 'events') await viewEvents(); else await viewMenuAdmin();
+}
+
+/* ===== รายการสั่งน้ำ ===== */
+async function viewEvents(){
+  const [ev, pp] = await Promise.all([
+    sb.from('drink_events').select('*').order('created_at', { ascending: false }),
+    sb.from('drink_people').select('event_id')]);
+  if(ev.error){ $('view').innerHTML = `<div class="err">${esc(ev.error.message)}</div>`; return; }
+  events = ev.data || [];
+  const cnt = {}; (pp.data || []).forEach(x => { cnt[x.event_id] = (cnt[x.event_id] || 0) + 1; });
+  $('view').innerHTML = `<div class="card"><h2>สร้างรายการสั่งน้ำใหม่</h2>
+      <div class="row" style="flex-wrap:nowrap"><input type="text" id="n_title" placeholder="ชื่อรายการ เช่น อบรมหลักสูตร X รุ่น 2" onkeydown="if(event.key==='Enter')addEvent()"><button class="btn green" onclick="addEvent()" style="white-space:nowrap">＋ สร้าง</button></div>
+      <p class="muted">1 รายการ = ชุดรายชื่อ + 1 ลิงก์สั่งน้ำ ผู้ใช้สั่งได้ 1 แก้วต่อวัน</p></div>
+    <div class="card"><h2>รายการทั้งหมด</h2>` + (events.length ?
+    `<table><thead><tr><th>ชื่อรายการ</th><th>รายชื่อ</th><th>สถานะ</th><th>สร้างเมื่อ</th><th></th></tr></thead><tbody>` +
+    events.map(e => `<tr><td><b>${esc(e.title)}</b></td><td>${cnt[e.id] || 0} คน</td>
+      <td>${e.is_open ? '<span class="tag ok">เปิดรับสั่ง</span>' : '<span class="tag gray">ปิดรับสั่ง</span>'}</td><td>${fmtT(e.created_at)}</td>
+      <td><button class="btn sm" onclick="openEvent('${esc(e.id)}')">เปิด</button></td></tr>`).join('') + '</tbody></table>'
+    : '<p class="muted">ยังไม่มีรายการ</p>') + '</div>';
+}
+async function addEvent(){
+  const title = $('n_title').value.trim();
+  if(!title){ toast('กรุณาใส่ชื่อรายการ'); return; }
+  const { data, error } = await sb.from('drink_events').insert({ title }).select().single();
+  if(error){ toast('ผิดพลาด: ' + error.message); return; }
+  await openEvent(data.id, 'people');
+}
+
+/* ===== เปิดรายการ + โหลดข้อมูล ===== */
+async function openEvent(id, startTab){
+  leaveEvent();
+  view = 'detail'; tab = startTab || 'dash'; day = todayStr; openPending = false;
+  editingPerson = null; pSearch = '';
+  shell(); renderNav();
+  $('view').innerHTML = '<div class="card muted">กำลังโหลด...</div>';
+  const { data, error } = await sb.from('drink_events').select('*').eq('id', id).single();
+  if(error){ $('view').innerHTML = `<div class="err">${esc(error.message)}</div>`; return; }
+  cur = data;
+  await loadAll();
+  subscribe();
+  renderDetail();
+}
+function sortPeople(list){
+  return list.slice().sort((a, b) =>
+    ((!a.emp_id ? 1 : 0) - (!b.emp_id ? 1 : 0)) ||
+    String(a.emp_id || '').localeCompare(String(b.emp_id || ''), 'th', { numeric: true }) ||
+    String(a.full_name).localeCompare(String(b.full_name), 'th'));
+}
+async function loadAll(){
+  const id = cur.id;
+  const [pp, od, ev, sw, ex] = await Promise.all([
+    sb.from('drink_people').select('*').eq('event_id', id),
+    sb.from('drink_orders').select('*').eq('event_id', id).range(0, 9999),
+    sb.from('drink_events').select('*').eq('id', id).single(),
+    sb.from('drink_sweetness').select('*').order('sort').order('label'),
+    sb.from('exam_sessions').select('id,title,batch').order('created_at', { ascending: false }),
+  ]);
+  people = sortPeople(pp.data || []);
+  orders = od.data || [];
+  if(ev.data) cur = ev.data;
+  sweet = sw.data || [];
+  examSessions = ex.data || [];
+}
+function subscribe(){
+  channel = sb.channel('drink-' + cur.id)
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'drink_orders', filter: 'event_id=eq.' + cur.id }, scheduleReload)
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'drink_people', filter: 'event_id=eq.' + cur.id }, scheduleReload)
+    .subscribe(st => { rtStatus = st === 'SUBSCRIBED' ? '🟢 Real time เชื่อมต่อแล้ว' : '🟡 กำลังเชื่อมต่อ Real time...'; const el = $('rt'); if(el) el.textContent = rtStatus; });
+  pollTimer = setInterval(() => { if(tab === 'dash' && !document.hidden) scheduleReload(); }, 20000);   // สำรองเผื่อ Realtime หลุด
+}
+function scheduleReload(){
+  clearTimeout(reloadTimer);
+  reloadTimer = setTimeout(async () => { if(!cur) return; await loadAll(); if(tab === 'dash') renderTab(); }, 300);
+}
+function leaveEvent(){
+  if(channel){ sb.removeChannel(channel); channel = null; }
+  clearInterval(pollTimer); clearTimeout(reloadTimer); cur = null;
+}
+
+/* ===== โครงหน้ารายละเอียด ===== */
+function renderDetail(){
+  $('view').innerHTML = `<div class="row" style="justify-content:space-between;margin-bottom:10px">
+      <div><button class="btn ghost sm" onclick="go('events')">← กลับรายการ</button>
+      <h2 style="display:inline;margin-left:10px">${esc(cur.title)}</h2>
+      ${cur.is_open ? '<span class="tag ok">เปิดรับสั่ง</span>' : '<span class="tag gray">ปิดรับสั่ง</span>'}</div>
+      <span class="muted" id="rt">${esc(rtStatus)}</span></div>
+    <div class="tabs">${[['dash', '📊 แดชบอร์ด'], ['people', '👥 รายชื่อ'], ['set', '⚙️ ตั้งค่า/ลิงก์']].map(([k, l]) =>
+      `<div class="tab ${tab === k ? 'on' : ''}" onclick="setTab('${k}')">${l}</div>`).join('')}</div>
+    <div id="tabBody"></div>`;
+  renderTab();
+}
+function setTab(t){ tab = t; editingPerson = null; renderDetail(); }
+function renderTab(){
+  const el = $('tabBody'); if(!el) return;
+  if(tab === 'dash') el.innerHTML = dashHtml();
+  else if(tab === 'people') { el.innerHTML = peopleHtml(); fillPersonForm(); }
+  else el.innerHTML = settingsHtml();
+}
+
+/* ===== แดชบอร์ด (รายวัน) ===== */
+function curOrder(pid, d){
+  return orders.filter(o => o.person_id === pid && o.order_date === d && !o.unlocked)
+    .sort((a, b) => b.created_at.localeCompare(a.created_at))[0] || null;
+}
+function lastUnlocked(pid, d){
+  return orders.filter(o => o.person_id === pid && o.order_date === d && o.unlocked)
+    .sort((a, b) => b.created_at.localeCompare(a.created_at))[0] || null;
+}
+function sweetRank(label){ const i = sweet.findIndex(s => s.label === label); return i < 0 ? 999 : i; }
+function summaryRows(d){
+  const m = new Map();
+  people.forEach(p => {
+    const o = curOrder(p.id, d); if(!o || o.skipped) return;
+    const e = m.get(o.menu_name) || { name: o.menu_name, total: 0, sw: new Map() };
+    e.total++; const k = o.sweetness || ''; e.sw.set(k, (e.sw.get(k) || 0) + 1);
+    m.set(o.menu_name, e);
+  });
+  return [...m.values()].sort((a, b) => b.total - a.total || a.name.localeCompare(b.name, 'th'));
+}
+function swEntries(e){ return [...e.sw.entries()].sort((a, b) => sweetRank(a[0]) - sweetRank(b[0])); }
+function dashHtml(){
+  if(!people.length) return '<div class="card"><p class="muted">ยังไม่มีรายชื่อ ไปที่แท็บ "รายชื่อ" เพื่อนำเข้าจากการสอบหรือพิมพ์เพิ่ม</p></div>';
+  const d = day;
+  const done = people.filter(p => curOrder(p.id, d));
+  const pending = people.filter(p => !curOrder(p.id, d));
+  const skipped = done.filter(p => curOrder(p.id, d).skipped);
+  const cups = done.length - skipped.length;
+  const sum = summaryRows(d);
+  const dates = [...new Set(orders.map(o => o.order_date))].sort().reverse().slice(0, 10);
+
+  let h = `<div class="card"><div class="daybar">
+      <b>วันที่</b><input type="date" id="dt" value="${esc(d)}" onchange="setDay(this.value)">
+      <button class="btn ghost sm" onclick="setDay('${esc(todayStr)}')">วันนี้</button>
+      <span class="muted">${esc(thaiDate(d))}${d === todayStr ? ' (วันนี้)' : ''}</span>
+      <span style="flex:1"></span>
+      <button class="btn ghost" onclick="copySummary()">📋 คัดลอกสรุปส่งร้าน</button>
+      <button class="btn green" onclick="exportExcel()">⬇ Export Excel</button></div>
+    ${dates.length ? `<div class="muted">วันที่มีการสั่ง: ${dates.map(x => `<a href="#" onclick="setDay('${esc(x)}');return false">${esc(thaiDate(x, 'medium'))}</a>`).join(' · ')}</div>` : ''}
+    <div class="stats">
+      <div class="stat"><div class="n">${done.length}/${people.length}</div><div class="l">สั่งแล้ว (รวมไม่รับ)</div></div>
+      <div class="stat"><div class="n" style="color:var(--blue)">${cups}</div><div class="l">จำนวนแก้วทั้งหมด</div></div>
+      <div class="stat"><div class="n">${skipped.length}</div><div class="l">ไม่รับเครื่องดื่ม</div></div>
+      <div class="stat click" onclick="openPending=!openPending;renderTab()"><div class="n" style="color:var(--red)">${pending.length}</div><div class="l">ยังไม่สั่ง (กดดูรายชื่อ)</div></div>
+    </div>`;
+  if(openPending){
+    h += `<h3>ยังไม่สั่ง (${pending.length})</h3>` + (pending.length ? '<div>' + pending.map(p => {
+      const u = lastUnlocked(p.id, d);
+      return `<span class="tag ${u ? 'wait' : 'gray'}" style="margin:2px">${esc(p.full_name)}${p.grp && p.grp !== 'ผู้เข้าอบรม' ? ' · ' + esc(p.grp) : ''}${u ? ' (รอสั่งใหม่)' : ''}</span>`;
+    }).join('') + '</div>' : '<p class="muted">สั่งครบทุกคนแล้ว 🎉</p>');
+  }
+  h += '</div>';
+
+  h += `<div class="card"><h3>สรุปแต่ละเมนู</h3>` + (sum.length ?
+    `<table><thead><tr><th>เมนู</th><th>แยกตามความหวาน</th><th style="text-align:right">รวม (แก้ว)</th></tr></thead><tbody>` +
+    sum.map(e => `<tr><td><b>${esc(e.name)}</b></td><td>${swEntries(e).map(([k, n]) => `<span class="chip">${k ? esc(k) : 'ไม่มีระดับความหวาน'} × ${n}</span>`).join('')}</td><td style="text-align:right"><b>${e.total}</b></td></tr>`).join('') +
+    `<tr><td colspan="2" style="text-align:right"><b>รวมทั้งหมด</b></td><td style="text-align:right"><b>${cups}</b></td></tr></tbody></table>`
+    : '<p class="muted">ยังไม่มีผู้สั่งในวันนี้</p>') + '</div>';
+
+  h += `<div class="card"><h3>ใครสั่งอะไร</h3><div style="overflow:auto"><table><thead><tr><th>รหัส</th><th>ชื่อ-นามสกุล</th><th>กลุ่ม</th><th>เครื่องดื่ม</th><th>หมายเหตุ</th><th>เวลา</th><th></th></tr></thead><tbody>` +
+    people.map(p => {
+      const o = curOrder(p.id, d), u = lastUnlocked(p.id, d);
+      let what = '<span class="muted">—</span>';
+      if(o) what = o.skipped ? '<span class="tag gray">ไม่รับเครื่องดื่ม</span>' : `<b>${esc(o.menu_name)}</b>${o.sweetness ? ' · ' + esc(o.sweetness) : ''}`;
+      else if(u) what = `<span class="tag wait">ปลดล็อกแล้ว (รอสั่งใหม่)</span>`;
+      return `<tr><td>${esc(p.emp_id || '')}</td><td>${esc(p.full_name)}</td><td>${esc(p.grp)}</td><td>${what}</td><td>${o ? esc(o.note) : ''}</td><td>${o ? fmtHM(o.created_at) : ''}</td>
+        <td>${o ? `<button class="btn red sm" onclick="unlockOrder('${esc(o.id)}')">ปลดล็อก</button>` : ''}</td></tr>`;
+    }).join('') + '</tbody></table></div></div>';
+  return h;
+}
+function setDay(v){ if(!v) return; day = v; renderTab(); }
+
+async function unlockOrder(oid){
+  const o = orders.find(x => x.id === oid); if(!o) return;
+  const p = people.find(x => x.id === o.person_id);
+  if(!confirm(`ปลดล็อกการสั่งของ ${p ? p.full_name : ''} (${o.menu_name}) ให้สั่งใหม่?\n(รายการเดิมยังเก็บไว้ในประวัติ)`)) return;
+  const { error } = await sb.from('drink_orders').update({ unlocked: true }).eq('id', oid);
+  if(error){ toast('ผิดพลาด: ' + error.message); return; }
+  toast('ปลดล็อกแล้ว'); await loadAll(); renderTab();
+}
+
+function summaryText(){
+  const d = day, sum = summaryRows(d);
+  const cups = sum.reduce((s, e) => s + e.total, 0);
+  const lines = [`🥤 สั่งเครื่องดื่ม ${cur.title}`, thaiDate(d), ''];
+  sum.forEach(e => swEntries(e).forEach(([k, n]) => lines.push(`${e.name}${k ? ' ' + k : ''} x${n}`)));
+  lines.push('', `รวม ${cups} แก้ว`);
+  const notes = [];
+  people.forEach(p => { const o = curOrder(p.id, d); if(o && !o.skipped && o.note) notes.push(`- ${p.full_name}: ${o.menu_name}${o.sweetness ? ' ' + o.sweetness : ''} (${o.note})`); });
+  if(notes.length){ lines.push('', 'หมายเหตุ:'); lines.push(...notes); }
+  return lines.join('\n');
+}
+async function copySummary(){
+  const t = summaryText();
+  try { await navigator.clipboard.writeText(t); toast('คัดลอกสรุปแล้ว'); }
+  catch(e){
+    const ta = document.createElement('textarea'); ta.value = t; document.body.appendChild(ta); ta.select();
+    try { document.execCommand('copy'); toast('คัดลอกสรุปแล้ว'); } catch(_){ toast('คัดลอกไม่สำเร็จ'); }
+    ta.remove();
+  }
+}
+
+function exportExcel(){
+  const d = day, wb = XLSX.utils.book_new();
+  const sum = summaryRows(d), cups = sum.reduce((s, e) => s + e.total, 0);
+  const a1 = [['เมนู', 'ระดับความหวาน', 'จำนวน (แก้ว)']];
+  sum.forEach(e => swEntries(e).forEach(([k, n]) => a1.push([e.name, k, n])));
+  a1.push(['รวมทั้งหมด', '', cups]);
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(a1), 'สรุปเมนู');
+
+  const a2 = [['รหัสพนักงาน', 'ชื่อ-นามสกุล', 'กลุ่ม', 'สังกัด', 'สถานะ', 'เครื่องดื่ม', 'ความหวาน', 'หมายเหตุ', 'เวลา']];
+  people.forEach(p => {
+    const o = curOrder(p.id, d);
+    a2.push([p.emp_id || '', p.full_name, p.grp, p.unit, o ? (o.skipped ? 'ไม่รับ' : 'สั่งแล้ว') : 'ยังไม่สั่ง',
+      o && !o.skipped ? o.menu_name : '', o ? (o.sweetness || '') : '', o ? o.note : '', o ? fmtHM(o.created_at) : '']);
+  });
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(a2), 'รายคน ' + d);
+
+  const pmap = new Map(people.map(p => [p.id, p]));
+  const a3 = [['วันที่', 'รหัสพนักงาน', 'ชื่อ-นามสกุล', 'กลุ่ม', 'เครื่องดื่ม', 'ความหวาน', 'หมายเหตุ', 'ไม่รับ', 'ปลดล็อกแล้ว', 'เวลา']];
+  orders.slice().sort((a, b) => a.order_date.localeCompare(b.order_date) || a.created_at.localeCompare(b.created_at)).forEach(o => {
+    const p = pmap.get(o.person_id) || {};
+    a3.push([o.order_date, p.emp_id || '', p.full_name || '', p.grp || '', o.skipped ? '' : o.menu_name, o.sweetness || '', o.note, o.skipped ? 'ใช่' : '', o.unlocked ? 'ใช่' : '', fmtT(o.created_at)]);
+  });
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(a3), 'ทุกวัน');
+  XLSX.writeFile(wb, `สั่งน้ำ_${cur.title}_${d}.xlsx`.replace(/[\\/:*?"<>|]/g, '_'));
+}
+
+/* ===== รายชื่อ ===== */
+function peopleHtml(){
+  const q = pSearch.trim().toLowerCase();
+  const list = people.filter(p => !q || p.full_name.toLowerCase().includes(q) || (p.emp_id || '').toLowerCase().includes(q) || (p.grp || '').toLowerCase().includes(q));
+  const grps = [...new Set(['ผู้เข้าอบรม', 'เจ้าหน้าที่', 'วิทยากร', ...people.map(p => p.grp)])];
+  return `<div class="card"><h2>นำเข้ารายชื่อจากการสอบ</h2>
+      <div class="row" style="flex-wrap:nowrap"><select id="imp_s"><option value="">— เลือกการสอบ —</option>` +
+        examSessions.map(s => `<option value="${esc(s.id)}">${esc(s.title)}${s.batch ? ' (รุ่น ' + esc(s.batch) + ')' : ''}</option>`).join('') +
+      `</select><button class="btn" onclick="importFromExam()" style="white-space:nowrap">⬇ นำเข้า</button></div>
+      <p class="muted">คัดลอกผู้เข้าอบรมมาเป็นกลุ่ม "ผู้เข้าอบรม" · นำเข้าซ้ำได้ (เพิ่มเฉพาะคนที่ยังไม่มี ไม่ทับข้อมูลเดิม)</p></div>
+    <div class="card"><h2 id="pf_title">เพิ่มรายชื่อ (เจ้าหน้าที่ วิทยากร ฯลฯ)</h2>
+      <div class="grid2" style="grid-template-columns:2fr 1fr 1fr 1fr auto;align-items:end">
+        <div><label class="f">ชื่อ-นามสกุล *</label><input type="text" id="pf_name" onkeydown="if(event.key==='Enter')savePerson()"></div>
+        <div><label class="f">รหัส (ถ้ามี)</label><input type="text" id="pf_id"></div>
+        <div><label class="f">สังกัด</label><input type="text" id="pf_unit"></div>
+        <div><label class="f">กลุ่ม</label><input type="text" id="pf_grp" list="grplist" value="เจ้าหน้าที่"><datalist id="grplist">${grps.map(g => `<option value="${esc(g)}">`).join('')}</datalist></div>
+        <div class="row" style="flex-wrap:nowrap"><button class="btn green" id="pf_btn" onclick="savePerson()" style="white-space:nowrap">เพิ่ม</button><button class="btn ghost hide" id="pf_cancel" onclick="cancelEditPerson()">ยกเลิก</button></div>
+      </div></div>
+    <div class="card"><div class="row" style="justify-content:space-between"><h2 style="margin:0">รายชื่อทั้งหมด ${people.length} คน</h2>
+        <input type="text" placeholder="ค้นหาชื่อ/รหัส/กลุ่ม" value="${esc(pSearch)}" oninput="pSearch=this.value;renderPeopleList()" style="max-width:260px"></div>
+      <div style="overflow:auto;margin-top:10px" id="plist">${peopleTable(list)}</div></div>`;
+}
+function peopleTable(list){
+  if(!people.length) return '<p class="muted">ยังไม่มีรายชื่อ</p>';
+  if(!list.length) return '<p class="muted">ไม่พบรายชื่อที่ค้นหา</p>';
+  return `<table><thead><tr><th>รหัส</th><th>ชื่อ-นามสกุล</th><th>สังกัด</th><th>กลุ่ม</th><th></th></tr></thead><tbody>` +
+    list.map(p => `<tr><td>${esc(p.emp_id || '')}</td><td>${esc(p.full_name)}</td><td>${esc(p.unit)}</td><td>${esc(p.grp)}</td>
+      <td class="row"><button class="btn ghost sm" onclick="editPerson('${esc(p.id)}')">แก้ไข</button><button class="btn red sm" onclick="delPerson('${esc(p.id)}')">ลบ</button></td></tr>`).join('') + '</tbody></table>';
+}
+function renderPeopleList(){
+  const q = pSearch.trim().toLowerCase();
+  $('plist').innerHTML = peopleTable(people.filter(p => !q || p.full_name.toLowerCase().includes(q) || (p.emp_id || '').toLowerCase().includes(q) || (p.grp || '').toLowerCase().includes(q)));
+}
+function fillPersonForm(){
+  if(!editingPerson) return;
+  const p = people.find(x => x.id === editingPerson); if(!p){ editingPerson = null; return; }
+  $('pf_name').value = p.full_name; $('pf_id').value = p.emp_id || ''; $('pf_unit').value = p.unit; $('pf_grp').value = p.grp;
+  $('pf_title').textContent = 'แก้ไขรายชื่อ'; $('pf_btn').textContent = 'บันทึกการแก้ไข'; $('pf_cancel').classList.remove('hide');
+}
+function editPerson(id){ editingPerson = id; renderTab(); window.scrollTo(0, 0); }
+function cancelEditPerson(){ editingPerson = null; renderTab(); }
+async function savePerson(){
+  const name = $('pf_name').value.trim();
+  if(!name){ toast('กรุณาใส่ชื่อ'); return; }
+  const row = { full_name: name, emp_id: $('pf_id').value.trim() || null, unit: $('pf_unit').value.trim(), grp: $('pf_grp').value.trim() || 'ผู้เข้าอบรม' };
+  let r;
+  if(editingPerson) r = await sb.from('drink_people').update(row).eq('id', editingPerson);
+  else r = await sb.from('drink_people').insert({ ...row, event_id: cur.id });
+  if(r.error){ toast((r.error.message || '').includes('duplicate') || (r.error.code === '23505') ? 'รหัสนี้มีอยู่แล้วในรายการ' : 'ผิดพลาด: ' + r.error.message); return; }
+  toast(editingPerson ? 'บันทึกแล้ว' : 'เพิ่มแล้ว'); editingPerson = null;
+  await loadAll(); renderTab();
+}
+async function delPerson(id){
+  const p = people.find(x => x.id === id);
+  if(!confirm(`ลบ ${p ? p.full_name : ''} ? (ประวัติการสั่งของคนนี้จะถูกลบด้วย)`)) return;
+  const { error } = await sb.from('drink_people').delete().eq('id', id);
+  if(error){ toast('ผิดพลาด: ' + error.message); return; }
+  await loadAll(); renderTab();
+}
+async function importFromExam(){
+  const sid = $('imp_s').value;
+  if(!sid){ toast('กรุณาเลือกการสอบ'); return; }
+  const { data, error } = await sb.from('exam_participants').select('emp_id,full_name,unit').eq('session_id', sid);
+  if(error){ toast('ผิดพลาด: ' + error.message); return; }
+  if(!data || !data.length){ toast('การสอบนี้ยังไม่มีรายชื่อ'); return; }
+  const before = people.length;
+  const rows = data.map(x => ({ event_id: cur.id, emp_id: x.emp_id, full_name: x.full_name, unit: x.unit || '', grp: 'ผู้เข้าอบรม' }));
+  const r = await sb.from('drink_people').upsert(rows, { onConflict: 'event_id,emp_id', ignoreDuplicates: true });
+  if(r.error){ toast('ผิดพลาด: ' + r.error.message); return; }
+  await loadAll(); renderTab();
+  toast(`นำเข้า ${data.length} คน (เพิ่มใหม่ ${people.length - before} คน)`);
+}
+
+/* ===== ตั้งค่า / ลิงก์ ===== */
+function studentLink(){ return location.href.split('?')[0].split('#')[0].replace(/[^\/]*$/, '') + 'drink-order.html?e=' + cur.id; }
+function settingsHtml(){
+  const link = studentLink();
+  return `<div class="card"><h2>ลิงก์สั่งเครื่องดื่ม</h2>
+      <div class="linkbox">${esc(link)}</div>
+      <div class="row" style="margin-top:8px"><button class="btn" onclick="navigator.clipboard.writeText('${esc(link)}').then(()=>toast('คัดลอกลิงก์แล้ว'))">📋 คัดลอกลิงก์</button></div>
+      <p style="margin-top:10px"><img alt="QR" width="180" height="180" src="https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=${encodeURIComponent(link)}"><br><span class="muted">QR (สร้างผ่าน qrserver.com — ต้องมีอินเทอร์เน็ต) · ไฟล์ drink-order.html ต้องอยู่โฟลเดอร์เดียวกับไฟล์นี้บนเว็บ</span></p></div>
+    <div class="card"><h2>เปิด/ปิดรับสั่ง</h2>
+      <label class="row"><input type="checkbox" ${cur.is_open ? 'checked' : ''} onchange="setOpen(this.checked)"> เปิดรับสั่ง</label>
+      <p class="muted">ปิดแล้วผู้ใช้เปิดลิงก์จะเห็นข้อความ "ปิดรับการสั่งเครื่องดื่ม"</p></div>
+    <div class="card"><h2>ชื่อรายการ</h2>
+      <div class="row" style="flex-wrap:nowrap"><input type="text" id="s_title" value="${esc(cur.title)}"><button class="btn green" onclick="saveTitle()">บันทึก</button></div></div>
+    <div class="card"><h2>โซนอันตราย</h2>
+      <div class="row"><button class="btn red" onclick="clearOrders()">ล้างคำสั่งซื้อทั้งหมดของรายการนี้</button><button class="btn red" onclick="deleteEvent()">ลบรายการนี้ทั้งหมด</button></div></div>`;
+}
+async function setOpen(v){
+  const { error } = await sb.from('drink_events').update({ is_open: v }).eq('id', cur.id);
+  if(error){ toast('ผิดพลาด: ' + error.message); return; }
+  cur.is_open = v; toast('บันทึกแล้ว'); renderDetail();
+}
+async function saveTitle(){
+  const title = $('s_title').value.trim(); if(!title){ toast('ต้องมีชื่อรายการ'); return; }
+  const { error } = await sb.from('drink_events').update({ title }).eq('id', cur.id);
+  if(error){ toast('ผิดพลาด: ' + error.message); return; }
+  cur.title = title; toast('บันทึกแล้ว'); renderDetail();
+}
+async function clearOrders(){
+  if(!confirm('ล้างคำสั่งซื้อทุกวันของรายการนี้? ย้อนกลับไม่ได้')) return;
+  if(!confirm('ยืนยันอีกครั้ง: คำสั่งซื้อทั้งหมดจะหายถาวร')) return;
+  const { error } = await sb.from('drink_orders').delete().eq('event_id', cur.id);
+  if(error){ toast('ผิดพลาด: ' + error.message); return; }
+  toast('ล้างแล้ว'); await loadAll(); renderTab();
+}
+async function deleteEvent(){
+  if(!confirm('ลบรายการนี้ พร้อมรายชื่อและคำสั่งซื้อทั้งหมด? ย้อนกลับไม่ได้')) return;
+  const { error } = await sb.from('drink_events').delete().eq('id', cur.id);
+  if(error){ toast('ผิดพลาด: ' + error.message); return; }
+  toast('ลบแล้ว'); await go('events');
+}
+
+/* ===== เมนูและความหวาน (ใช้ร่วมทุกรายการ) ===== */
+async function loadMenu(){
+  const [m, s] = await Promise.all([
+    sb.from('drink_menu').select('*').order('sort').order('name'),
+    sb.from('drink_sweetness').select('*').order('sort').order('label')]);
+  menu = m.data || []; sweet = s.data || [];
+}
+async function viewMenuAdmin(){ await loadMenu(); renderMenuAdmin(); }
+function renderMenuAdmin(){
+  $('view').innerHTML = `<div class="card"><h2>เมนูเครื่องดื่ม</h2>
+      <p class="muted">เมนูใช้ร่วมกันทุกรายการสั่งน้ำ · ปิด "เปิดให้สั่ง" เมื่อเมนูหมด/งดชั่วคราว · เมนูที่ปิด "มีความหวาน" (เช่น น้ำเปล่า) จะไม่ถามระดับความหวาน</p>
+      <div class="row" style="flex-wrap:nowrap;margin-bottom:10px"><input type="text" id="mn_name" placeholder="ชื่อเมนู เช่น ชาเย็น" onkeydown="if(event.key==='Enter')addMenu()">
+        <label class="row" style="white-space:nowrap"><input type="checkbox" id="mn_sw" checked> มีความหวาน</label>
+        <button class="btn green" onclick="addMenu()" style="white-space:nowrap">＋ เพิ่มเมนู</button></div>` +
+    (menu.length ? `<table><thead><tr><th>เมนู</th><th>มีความหวาน</th><th>เปิดให้สั่ง</th><th></th></tr></thead><tbody>` +
+      menu.map((m, i) => `<tr><td>${editingMenu === m.id ? `<input type="text" id="mn_edit" value="${esc(m.name)}" onkeydown="if(event.key==='Enter')saveMenuName('${esc(m.id)}')">` : `<b>${esc(m.name)}</b>${m.active ? '' : ' <span class="tag gray">ซ่อนอยู่</span>'}`}</td>
+        <td><input type="checkbox" ${m.has_sweetness ? 'checked' : ''} onchange="updMenu('${esc(m.id)}','has_sweetness',this.checked)"></td>
+        <td><input type="checkbox" ${m.active ? 'checked' : ''} onchange="updMenu('${esc(m.id)}','active',this.checked)"></td>
+        <td class="row"><button class="btn ghost sm" ${i === 0 ? 'disabled' : ''} onclick="moveItem('drink_menu',menu,${i},-1)">↑</button><button class="btn ghost sm" ${i === menu.length - 1 ? 'disabled' : ''} onclick="moveItem('drink_menu',menu,${i},1)">↓</button>
+          ${editingMenu === m.id ? `<button class="btn green sm" onclick="saveMenuName('${esc(m.id)}')">บันทึก</button><button class="btn ghost sm" onclick="editingMenu=null;renderMenuAdmin()">ยกเลิก</button>`
+            : `<button class="btn ghost sm" onclick="editingMenu='${esc(m.id)}';renderMenuAdmin()">แก้ชื่อ</button>`}
+          <button class="btn red sm" onclick="delMenu('${esc(m.id)}')">ลบ</button></td></tr>`).join('') + '</tbody></table>'
+      : '<p class="muted">ยังไม่มีเมนู เพิ่มเมนูแรกด้านบน</p>') + `</div>
+    <div class="card"><h2>ระดับความหวาน</h2>
+      <p class="muted">ชุดเดียวใช้ทุกเมนู · แก้ชื่อทีหลัง คำสั่งซื้อเดิมยังแสดงชื่อเดิม</p>
+      <div class="row" style="flex-wrap:nowrap;margin-bottom:10px"><input type="text" id="sw_name" placeholder="เช่น หวานน้อย" onkeydown="if(event.key==='Enter')addSweet()"><button class="btn green" onclick="addSweet()" style="white-space:nowrap">＋ เพิ่ม</button></div>` +
+    (sweet.length ? `<table><thead><tr><th>ระดับความหวาน</th><th></th></tr></thead><tbody>` +
+      sweet.map((s, i) => `<tr><td>${editingSweet === s.id ? `<input type="text" id="sw_edit" value="${esc(s.label)}" onkeydown="if(event.key==='Enter')saveSweetName('${esc(s.id)}')">` : `<b>${esc(s.label)}</b>`}</td>
+        <td class="row"><button class="btn ghost sm" ${i === 0 ? 'disabled' : ''} onclick="moveItem('drink_sweetness',sweet,${i},-1)">↑</button><button class="btn ghost sm" ${i === sweet.length - 1 ? 'disabled' : ''} onclick="moveItem('drink_sweetness',sweet,${i},1)">↓</button>
+          ${editingSweet === s.id ? `<button class="btn green sm" onclick="saveSweetName('${esc(s.id)}')">บันทึก</button><button class="btn ghost sm" onclick="editingSweet=null;renderMenuAdmin()">ยกเลิก</button>`
+            : `<button class="btn ghost sm" onclick="editingSweet='${esc(s.id)}';renderMenuAdmin()">แก้ชื่อ</button>`}
+          <button class="btn red sm" onclick="delSweet('${esc(s.id)}')">ลบ</button></td></tr>`).join('') + '</tbody></table>'
+      : '<div class="warn">ยังไม่มีระดับความหวาน เมนูที่ "มีความหวาน" จะสั่งไม่ได้ กรุณาเพิ่มอย่างน้อย 1 ระดับ</div>') + '</div>';
+  if(editingMenu && $('mn_edit')) $('mn_edit').focus();
+  if(editingSweet && $('sw_edit')) $('sw_edit').focus();
+}
+async function addMenu(){
+  const name = $('mn_name').value.trim(); if(!name){ toast('กรุณาใส่ชื่อเมนู'); return; }
+  const { error } = await sb.from('drink_menu').insert({ name, has_sweetness: $('mn_sw').checked, sort: menu.length + 1 });
+  if(error){ toast('ผิดพลาด: ' + error.message); return; }
+  await loadMenu(); renderMenuAdmin();
+}
+async function updMenu(id, field, val){
+  const { error } = await sb.from('drink_menu').update({ [field]: val }).eq('id', id);
+  if(error){ toast('ผิดพลาด: ' + error.message); }
+  await loadMenu(); renderMenuAdmin();
+}
+async function saveMenuName(id){
+  const name = $('mn_edit').value.trim(); if(!name){ toast('ชื่อห้ามว่าง'); return; }
+  const { error } = await sb.from('drink_menu').update({ name }).eq('id', id);
+  if(error){ toast('ผิดพลาด: ' + error.message); return; }
+  editingMenu = null; await loadMenu(); renderMenuAdmin();
+}
+async function delMenu(id){
+  const m = menu.find(x => x.id === id);
+  if(!confirm(`ลบเมนู "${m ? m.name : ''}" ?\n(ประวัติคำสั่งซื้อเดิมยังเก็บชื่อเมนูไว้ ถ้าแค่หมดชั่วคราวให้ปิด "เปิดให้สั่ง" แทน)`)) return;
+  const { error } = await sb.from('drink_menu').delete().eq('id', id);
+  if(error){ toast('ผิดพลาด: ' + error.message); return; }
+  await loadMenu(); renderMenuAdmin();
+}
+async function addSweet(){
+  const label = $('sw_name').value.trim(); if(!label){ toast('กรุณาใส่ชื่อระดับความหวาน'); return; }
+  const { error } = await sb.from('drink_sweetness').insert({ label, sort: sweet.length + 1 });
+  if(error){ toast((error.code === '23505' || (error.message || '').includes('duplicate')) ? 'มีระดับนี้อยู่แล้ว' : 'ผิดพลาด: ' + error.message); return; }
+  await loadMenu(); renderMenuAdmin();
+}
+async function saveSweetName(id){
+  const label = $('sw_edit').value.trim(); if(!label){ toast('ชื่อห้ามว่าง'); return; }
+  const { error } = await sb.from('drink_sweetness').update({ label }).eq('id', id);
+  if(error){ toast((error.code === '23505' || (error.message || '').includes('duplicate')) ? 'มีระดับนี้อยู่แล้ว' : 'ผิดพลาด: ' + error.message); return; }
+  editingSweet = null; await loadMenu(); renderMenuAdmin();
+}
+async function delSweet(id){
+  const s = sweet.find(x => x.id === id);
+  if(!confirm(`ลบระดับความหวาน "${s ? s.label : ''}" ? (ประวัติเดิมยังแสดงชื่อเดิม)`)) return;
+  const { error } = await sb.from('drink_sweetness').delete().eq('id', id);
+  if(error){ toast('ผิดพลาด: ' + error.message); return; }
+  await loadMenu(); renderMenuAdmin();
+}
+async function moveItem(table, list, i, d){
+  const j = i + d; if(j < 0 || j >= list.length) return;
+  const arr = list.slice(); [arr[i], arr[j]] = [arr[j], arr[i]];
+  await Promise.all(arr.map((x, k) => x.sort === k + 1 ? null : sb.from(table).update({ sort: k + 1 }).eq('id', x.id)).filter(Boolean));
+  await loadMenu(); renderMenuAdmin();
+}
+
+boot();
+</script>
+</body>
+</html>
