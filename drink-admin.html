@@ -25,7 +25,7 @@ h3{margin:0 0 8px;font-size:15px;color:var(--navy)}
 .btn.red{background:#fdeeea;color:var(--red);border:1px solid #f3c7cf}
 .btn.green{background:var(--green)}
 .btn.sm{padding:4px 10px;font-size:13px}
-input[type=text],input[type=password],input[type=date],textarea,select{width:100%;padding:8px 10px;border:1.5px solid var(--line);border-radius:8px;font:inherit;background:#fff}
+input[type=text],input[type=password],input[type=date],input[type=datetime-local],textarea,select{width:100%;padding:8px 10px;border:1.5px solid var(--line);border-radius:8px;font:inherit;background:#fff}
 input:focus,textarea:focus,select:focus{outline:none;border-color:var(--blue)}
 label.f{display:block;font-size:12px;font-weight:700;color:var(--muted);margin:10px 0 3px}
 .grid2{display:grid;grid-template-columns:1fr 1fr;gap:10px 14px}
@@ -52,6 +52,13 @@ td{padding:7px 10px;border-bottom:1px solid #eef1f4;vertical-align:middle}
 .hide{display:none}
 .daybar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:8px}
 .daybar input[type=date]{width:auto}
+.modal{position:fixed;inset:0;background:rgba(15,39,68,.5);display:flex;align-items:center;justify-content:center;padding:16px;z-index:90}
+.modal .box{background:#fff;border-radius:12px;padding:18px;width:100%;max-height:90vh;overflow:auto}
+#printArea{display:none}
+.stkgrid{display:grid;gap:0}
+.stk{border:1px dashed #666;padding:3mm 4mm;min-height:28mm;break-inside:avoid;page-break-inside:avoid;line-height:1.25;overflow:hidden}
+.stk .n{font-size:15pt;font-weight:700}.stk .m{font-size:13pt;font-weight:600}.stk .s{font-size:12pt}.stk .t{font-size:10pt;font-style:italic}.stk .g{font-size:8pt;color:#444;margin-top:1mm}
+@media print{@page{size:A4;margin:8mm}body{background:#fff}header,main,.toast,.modal{display:none!important}#printArea{display:block!important}}
 @media(max-width:700px){.grid2{grid-template-columns:1fr}}
 </style>
 </head>
@@ -81,7 +88,10 @@ let user = null, view = 'events', tab = 'dash';
 let events = [], cur = null;
 let menu = [], sweet = [];
 let people = [], orders = [], examSessions = [];
-let todayStr = '', day = '';
+let todayStr = '';
+const TEMPS = ['ร้อน', 'เย็น'];
+const GROUPS = ['ผู้เข้าอบรม', 'เจ้าหน้าที่', 'วิทยากร', 'สังเกตการณ์', 'อื่นๆ'];
+let openUndeliv = false, onlyUndeliv = false;
 let openPending = false, editingMenu = null, editingSweet = null, editingPerson = null, pSearch = '';
 let channel = null, pollTimer = null, reloadTimer = null, rtStatus = '';
 
@@ -132,35 +142,68 @@ async function go(v){
 }
 
 /* ===== รายการสั่งน้ำ ===== */
+function evState(e){
+  if(!e.is_open) return 'MANUAL';
+  if(todayStr > e.order_date) return 'EXPIRED';
+  if(e.close_at && Date.now() >= new Date(e.close_at).getTime()) return 'TIME';
+  return 'OPEN';
+}
+function fmtClose(iso){ return new Date(iso).toLocaleString('th-TH', { dateStyle: 'short', timeStyle: 'short', timeZone: 'Asia/Bangkok' }); }
+function stateTag(e){
+  const s = evState(e);
+  if(s === 'OPEN') return `<span class="tag ok">เปิดรับสั่ง${e.close_at ? ' · ปิด ' + esc(fmtClose(e.close_at)) : ''}</span>`;
+  if(s === 'TIME') return '<span class="tag gray">หมดเวลารับสั่งแล้ว</span>';
+  if(s === 'EXPIRED') return '<span class="tag gray">สิ้นสุดแล้ว</span>';
+  return '<span class="tag gray">ปิดรับสั่ง</span>';
+}
+function dateLabel(d){
+  return thaiDate(d, 'medium') + (d === todayStr ? ' (วันนี้)' : d > todayStr ? ' (ล่วงหน้า)' : '');
+}
 async function viewEvents(){
   const [ev, pp] = await Promise.all([
-    sb.from('drink_events').select('*').order('created_at', { ascending: false }),
+    sb.from('drink_events').select('*').order('order_date', { ascending: false }).order('created_at', { ascending: false }),
     sb.from('drink_people').select('event_id')]);
   if(ev.error){ $('view').innerHTML = `<div class="err">${esc(ev.error.message)}</div>`; return; }
   events = ev.data || [];
   const cnt = {}; (pp.data || []).forEach(x => { cnt[x.event_id] = (cnt[x.event_id] || 0) + 1; });
+  const copyable = events.filter(e => cnt[e.id]);
   $('view').innerHTML = `<div class="card"><h2>สร้างรายการสั่งน้ำใหม่</h2>
-      <div class="row" style="flex-wrap:nowrap"><input type="text" id="n_title" placeholder="ชื่อรายการ เช่น อบรมหลักสูตร X รุ่น 2" onkeydown="if(event.key==='Enter')addEvent()"><button class="btn green" onclick="addEvent()" style="white-space:nowrap">＋ สร้าง</button></div>
-      <p class="muted">1 รายการ = ชุดรายชื่อ + 1 ลิงก์สั่งน้ำ ผู้ใช้สั่งได้ 1 แก้วต่อวัน</p></div>
+      <div class="grid2" style="grid-template-columns:2fr 1fr 2fr auto;align-items:end">
+        <div><label class="f">ชื่อรายการ *</label><input type="text" id="n_title" placeholder="เช่น อบรมหลักสูตร X รุ่น 2 (วันที่ 1)" onkeydown="if(event.key==='Enter')addEvent()"></div>
+        <div><label class="f">วันที่สั่ง *</label><input type="date" id="n_date" value="${esc(todayStr)}"></div>
+        <div><label class="f">คัดลอกรายชื่อจากรายการเดิม (ถ้าต้องการ)</label><select id="n_copy"><option value="">— ไม่คัดลอก —</option>` +
+          copyable.map(e => `<option value="${esc(e.id)}">${esc(e.title)} · ${esc(thaiDate(e.order_date, 'short'))} · ${cnt[e.id]} คน</option>`).join('') +
+        `</select></div>
+        <button class="btn green" onclick="addEvent()" style="white-space:nowrap">＋ สร้าง</button></div>
+      <p class="muted">1 รายการ = 1 วัน + ชุดรายชื่อ + 1 ลิงก์ · เลือกวันที่ล่วงหน้าได้ ผู้ใช้สั่งได้ตั้งแต่สร้างจนถึงสิ้นวันที่เลือก · อบรมหลายวันให้สร้างรายการแยกรายวัน (คัดลอกรายชื่อจากรายการเดิมได้)</p></div>
     <div class="card"><h2>รายการทั้งหมด</h2>` + (events.length ?
-    `<table><thead><tr><th>ชื่อรายการ</th><th>รายชื่อ</th><th>สถานะ</th><th>สร้างเมื่อ</th><th></th></tr></thead><tbody>` +
-    events.map(e => `<tr><td><b>${esc(e.title)}</b></td><td>${cnt[e.id] || 0} คน</td>
-      <td>${e.is_open ? '<span class="tag ok">เปิดรับสั่ง</span>' : '<span class="tag gray">ปิดรับสั่ง</span>'}</td><td>${fmtT(e.created_at)}</td>
-      <td><button class="btn sm" onclick="openEvent('${esc(e.id)}')">เปิด</button></td></tr>`).join('') + '</tbody></table>'
+    `<table><thead><tr><th>วันที่สั่ง</th><th>ชื่อรายการ</th><th>รายชื่อ</th><th>สถานะ</th><th></th></tr></thead><tbody>` +
+    events.map(e => `<tr><td>${esc(dateLabel(e.order_date))}</td><td><b>${esc(e.title)}</b></td><td>${cnt[e.id] || 0} คน</td>
+      <td>${stateTag(e)}</td><td><button class="btn sm" onclick="openEvent('${esc(e.id)}')">เปิด</button></td></tr>`).join('') + '</tbody></table>'
     : '<p class="muted">ยังไม่มีรายการ</p>') + '</div>';
 }
 async function addEvent(){
-  const title = $('n_title').value.trim();
+  const title = $('n_title').value.trim(), date = $('n_date').value, src = $('n_copy').value;
   if(!title){ toast('กรุณาใส่ชื่อรายการ'); return; }
-  const { data, error } = await sb.from('drink_events').insert({ title }).select().single();
+  if(!date){ toast('กรุณาเลือกวันที่สั่ง'); return; }
+  const { data, error } = await sb.from('drink_events').insert({ title, order_date: date }).select().single();
   if(error){ toast('ผิดพลาด: ' + error.message); return; }
-  await openEvent(data.id, 'people');
+  let copied = 0;
+  if(src){
+    const sp = await sb.from('drink_people').select('emp_id,full_name,unit,grp').eq('event_id', src);
+    if(sp.data && sp.data.length){
+      const r = await sb.from('drink_people').insert(sp.data.map(x => ({ emp_id: x.emp_id, full_name: x.full_name, unit: x.unit, grp: x.grp, event_id: data.id })));
+      if(r.error) toast('สร้างรายการแล้ว แต่คัดลอกรายชื่อไม่สำเร็จ: ' + r.error.message); else copied = sp.data.length;
+    }
+  }
+  await openEvent(data.id, copied ? 'set' : 'people');
+  if(copied) toast('คัดลอกรายชื่อ ' + copied + ' คนแล้ว');
 }
 
 /* ===== เปิดรายการ + โหลดข้อมูล ===== */
 async function openEvent(id, startTab){
   leaveEvent();
-  view = 'detail'; tab = startTab || 'dash'; day = todayStr; openPending = false;
+  view = 'detail'; tab = startTab || 'dash'; openPending = false; openUndeliv = false; onlyUndeliv = false;
   editingPerson = null; pSearch = '';
   shell(); renderNav();
   $('view').innerHTML = '<div class="card muted">กำลังโหลด...</div>';
@@ -213,7 +256,7 @@ function renderDetail(){
   $('view').innerHTML = `<div class="row" style="justify-content:space-between;margin-bottom:10px">
       <div><button class="btn ghost sm" onclick="go('events')">← กลับรายการ</button>
       <h2 style="display:inline;margin-left:10px">${esc(cur.title)}</h2>
-      ${cur.is_open ? '<span class="tag ok">เปิดรับสั่ง</span>' : '<span class="tag gray">ปิดรับสั่ง</span>'}</div>
+      ${stateTag(cur)} <span class="muted">วันที่ ${esc(thaiDate(cur.order_date, 'medium'))}</span></div>
       <span class="muted" id="rt">${esc(rtStatus)}</span></div>
     <div class="tabs">${[['dash', '📊 แดชบอร์ด'], ['people', '👥 รายชื่อ'], ['set', '⚙️ ตั้งค่า/ลิงก์']].map(([k, l]) =>
       `<div class="tab ${tab === k ? 'on' : ''}" onclick="setTab('${k}')">${l}</div>`).join('')}</div>
@@ -238,40 +281,47 @@ function lastUnlocked(pid, d){
     .sort((a, b) => b.created_at.localeCompare(a.created_at))[0] || null;
 }
 function sweetRank(label){ const i = sweet.findIndex(s => s.label === label); return i < 0 ? 999 : i; }
+function comboKey(o){ return (o.temp || '') + '|' + (o.sweetness || ''); }
+function comboLabel(k){ return k.split('|').filter(Boolean).join(' '); }
+function comboRank(k){ const [t, s] = k.split('|'); return (t ? TEMPS.indexOf(t) + 1 : 0) * 1000 + sweetRank(s); }
 function summaryRows(d){
   const m = new Map();
   people.forEach(p => {
     const o = curOrder(p.id, d); if(!o || o.skipped) return;
     const e = m.get(o.menu_name) || { name: o.menu_name, total: 0, sw: new Map() };
-    e.total++; const k = o.sweetness || ''; e.sw.set(k, (e.sw.get(k) || 0) + 1);
+    e.total++; const k = comboKey(o); e.sw.set(k, (e.sw.get(k) || 0) + 1);
     m.set(o.menu_name, e);
   });
   return [...m.values()].sort((a, b) => b.total - a.total || a.name.localeCompare(b.name, 'th'));
 }
-function swEntries(e){ return [...e.sw.entries()].sort((a, b) => sweetRank(a[0]) - sweetRank(b[0])); }
+function swEntries(e){ return [...e.sw.entries()].sort((a, b) => comboRank(a[0]) - comboRank(b[0])); }
+function cupsList(d){ return people.map(p => ({ p, o: curOrder(p.id, d) })).filter(x => x.o && !x.o.skipped); }
+function drinkText(o){
+  return `<b>${esc(o.menu_name)}</b>${o.temp ? ' · ' + esc(o.temp) : ''}${o.sweetness ? ' · ' + esc(o.sweetness) : ''}`;
+}
 function dashHtml(){
   if(!people.length) return '<div class="card"><p class="muted">ยังไม่มีรายชื่อ ไปที่แท็บ "รายชื่อ" เพื่อนำเข้าจากการสอบหรือพิมพ์เพิ่ม</p></div>';
-  const d = day;
+  const d = cur.order_date;
   const done = people.filter(p => curOrder(p.id, d));
   const pending = people.filter(p => !curOrder(p.id, d));
-  const skipped = done.filter(p => curOrder(p.id, d).skipped);
-  const cups = done.length - skipped.length;
+  const cl = cupsList(d);
+  const skipped = done.length - cl.length;
+  const gave = cl.filter(c => c.o.delivered).length;
+  const undeliv = cl.filter(c => !c.o.delivered);
   const sum = summaryRows(d);
-  const dates = [...new Set(orders.map(o => o.order_date))].sort().reverse().slice(0, 10);
 
   let h = `<div class="card"><div class="daybar">
-      <b>วันที่</b><input type="date" id="dt" value="${esc(d)}" onchange="setDay(this.value)">
-      <button class="btn ghost sm" onclick="setDay('${esc(todayStr)}')">วันนี้</button>
-      <span class="muted">${esc(thaiDate(d))}${d === todayStr ? ' (วันนี้)' : ''}</span>
+      <b>วันที่สั่ง</b><span>${esc(thaiDate(d))}</span><span class="muted">${d === todayStr ? '(วันนี้)' : d > todayStr ? '(ล่วงหน้า)' : '(ผ่านมาแล้ว)'}</span>
       <span style="flex:1"></span>
+      <button class="btn ghost" onclick="openStickerDialog()">🖨 พิมพ์สติกเกอร์</button>
       <button class="btn ghost" onclick="copySummary()">📋 คัดลอกสรุปส่งร้าน</button>
       <button class="btn green" onclick="exportExcel()">⬇ Export Excel</button></div>
-    ${dates.length ? `<div class="muted">วันที่มีการสั่ง: ${dates.map(x => `<a href="#" onclick="setDay('${esc(x)}');return false">${esc(thaiDate(x, 'medium'))}</a>`).join(' · ')}</div>` : ''}
     <div class="stats">
       <div class="stat"><div class="n">${done.length}/${people.length}</div><div class="l">สั่งแล้ว (รวมไม่รับ)</div></div>
-      <div class="stat"><div class="n" style="color:var(--blue)">${cups}</div><div class="l">จำนวนแก้วทั้งหมด</div></div>
-      <div class="stat"><div class="n">${skipped.length}</div><div class="l">ไม่รับเครื่องดื่ม</div></div>
+      <div class="stat"><div class="n" style="color:var(--blue)">${cl.length}</div><div class="l">จำนวนแก้วทั้งหมด</div></div>
+      <div class="stat"><div class="n">${skipped}</div><div class="l">ไม่รับเครื่องดื่ม</div></div>
       <div class="stat click" onclick="openPending=!openPending;renderTab()"><div class="n" style="color:var(--red)">${pending.length}</div><div class="l">ยังไม่สั่ง (กดดูรายชื่อ)</div></div>
+      <div class="stat click" onclick="openUndeliv=!openUndeliv;renderTab()"><div class="n" style="color:var(--green)">${gave}/${cl.length}</div><div class="l">แจกแล้ว (กดดูคนที่ยังไม่ได้รับ)</div></div>
     </div>`;
   if(openPending){
     h += `<h3>ยังไม่สั่ง (${pending.length})</h3>` + (pending.length ? '<div>' + pending.map(p => {
@@ -279,26 +329,41 @@ function dashHtml(){
       return `<span class="tag ${u ? 'wait' : 'gray'}" style="margin:2px">${esc(p.full_name)}${p.grp && p.grp !== 'ผู้เข้าอบรม' ? ' · ' + esc(p.grp) : ''}${u ? ' (รอสั่งใหม่)' : ''}</span>`;
     }).join('') + '</div>' : '<p class="muted">สั่งครบทุกคนแล้ว 🎉</p>');
   }
+  if(openUndeliv){
+    h += `<h3 style="margin-top:10px">ยังไม่ได้รับเครื่องดื่ม (${undeliv.length})</h3>` + (undeliv.length ? '<div>' + undeliv.map(c =>
+      `<span class="tag wait" style="margin:2px">${esc(c.p.full_name)} · ${esc(c.o.menu_name)}${c.o.temp ? ' ' + esc(c.o.temp) : ''}</span>`).join('') + '</div>' : '<p class="muted">แจกครบทุกแก้วแล้ว 🎉</p>');
+  }
   h += '</div>';
 
   h += `<div class="card"><h3>สรุปแต่ละเมนู</h3>` + (sum.length ?
-    `<table><thead><tr><th>เมนู</th><th>แยกตามความหวาน</th><th style="text-align:right">รวม (แก้ว)</th></tr></thead><tbody>` +
-    sum.map(e => `<tr><td><b>${esc(e.name)}</b></td><td>${swEntries(e).map(([k, n]) => `<span class="chip">${k ? esc(k) : 'ไม่มีระดับความหวาน'} × ${n}</span>`).join('')}</td><td style="text-align:right"><b>${e.total}</b></td></tr>`).join('') +
-    `<tr><td colspan="2" style="text-align:right"><b>รวมทั้งหมด</b></td><td style="text-align:right"><b>${cups}</b></td></tr></tbody></table>`
-    : '<p class="muted">ยังไม่มีผู้สั่งในวันนี้</p>') + '</div>';
+    `<table><thead><tr><th>เมนู</th><th>แยกตามร้อน/เย็น · ความหวาน</th><th style="text-align:right">รวม (แก้ว)</th></tr></thead><tbody>` +
+    sum.map(e => `<tr><td><b>${esc(e.name)}</b></td><td>${swEntries(e).map(([k, n]) => `<span class="chip">${comboLabel(k) ? esc(comboLabel(k)) : 'ไม่มีตัวเลือก'} × ${n}</span>`).join('')}</td><td style="text-align:right"><b>${e.total}</b></td></tr>`).join('') +
+    `<tr><td colspan="2" style="text-align:right"><b>รวมทั้งหมด</b></td><td style="text-align:right"><b>${cl.length}</b></td></tr></tbody></table>`
+    : '<p class="muted">ยังไม่มีผู้สั่ง</p>') + '</div>';
 
-  h += `<div class="card"><h3>ใครสั่งอะไร</h3><div style="overflow:auto"><table><thead><tr><th>รหัส</th><th>ชื่อ-นามสกุล</th><th>กลุ่ม</th><th>เครื่องดื่ม</th><th>หมายเหตุ</th><th>เวลา</th><th></th></tr></thead><tbody>` +
-    people.map(p => {
+  const rows = onlyUndeliv ? people.filter(p => { const o = curOrder(p.id, d); return o && !o.skipped && !o.delivered; }) : people;
+  h += `<div class="card"><div class="row" style="justify-content:space-between"><h3 style="margin:0">ใครสั่งอะไร</h3>
+      <label class="row"><input type="checkbox" ${onlyUndeliv ? 'checked' : ''} onchange="onlyUndeliv=this.checked;renderTab()"> แสดงเฉพาะแก้วที่ยังไม่แจก</label></div>
+    <div style="overflow:auto;margin-top:8px"><table><thead><tr><th>รหัส</th><th>ชื่อ-นามสกุล</th><th>กลุ่ม</th><th>เครื่องดื่ม</th><th>หมายเหตุ</th><th>เวลา</th><th>แจกแล้ว</th><th></th></tr></thead><tbody>` +
+    rows.map(p => {
       const o = curOrder(p.id, d), u = lastUnlocked(p.id, d);
       let what = '<span class="muted">—</span>';
-      if(o) what = o.skipped ? '<span class="tag gray">ไม่รับเครื่องดื่ม</span>' : `<b>${esc(o.menu_name)}</b>${o.sweetness ? ' · ' + esc(o.sweetness) : ''}`;
+      if(o) what = o.skipped ? '<span class="tag gray">ไม่รับเครื่องดื่ม</span>' : drinkText(o);
       else if(u) what = `<span class="tag wait">ปลดล็อกแล้ว (รอสั่งใหม่)</span>`;
-      return `<tr><td>${esc(p.emp_id || '')}</td><td>${esc(p.full_name)}</td><td>${esc(p.grp)}</td><td>${what}</td><td>${o ? esc(o.note) : ''}</td><td>${o ? fmtHM(o.created_at) : ''}</td>
+      const chk = (o && !o.skipped) ? `<input type="checkbox" ${o.delivered ? 'checked' : ''} onchange="toggleDelivered('${esc(o.id)}',this.checked)" style="width:20px;height:20px">` : '';
+      return `<tr ${o && o.delivered ? 'style="background:#f0faf4"' : ''}><td>${esc(p.emp_id || '')}</td><td>${esc(p.full_name)}</td><td>${esc(p.grp)}</td><td>${what}</td><td>${o ? esc(o.note) : ''}</td><td>${o ? fmtHM(o.created_at) : ''}</td><td style="text-align:center">${chk}</td>
         <td>${o ? `<button class="btn red sm" onclick="unlockOrder('${esc(o.id)}')">ปลดล็อก</button>` : ''}</td></tr>`;
-    }).join('') + '</tbody></table></div></div>';
+    }).join('') + '</tbody></table>' + (rows.length ? '' : '<p class="muted">ไม่มีรายการ</p>') + '</div></div>';
   return h;
 }
-function setDay(v){ if(!v) return; day = v; renderTab(); }
+
+async function toggleDelivered(oid, v){
+  const o = orders.find(x => x.id === oid); if(!o) return;
+  const at = v ? new Date().toISOString() : null;
+  o.delivered = v; o.delivered_at = at; renderTab();          // แสดงผลทันที แล้วค่อยบันทึก
+  const { error } = await sb.from('drink_orders').update({ delivered: v, delivered_at: at }).eq('id', oid);
+  if(error){ toast('บันทึกไม่สำเร็จ: ' + error.message); await loadAll(); renderTab(); }
+}
 
 async function unlockOrder(oid){
   const o = orders.find(x => x.id === oid); if(!o) return;
@@ -310,13 +375,13 @@ async function unlockOrder(oid){
 }
 
 function summaryText(){
-  const d = day, sum = summaryRows(d);
+  const d = cur.order_date, sum = summaryRows(d);
   const cups = sum.reduce((s, e) => s + e.total, 0);
-  const lines = [`🥤 สั่งเครื่องดื่ม ${cur.title}`, thaiDate(d), ''];
-  sum.forEach(e => swEntries(e).forEach(([k, n]) => lines.push(`${e.name}${k ? ' ' + k : ''} x${n}`)));
+  const lines = [`🥤 สั่งเครื่องดื่ม ${cur.title}`, 'วันที่ ' + thaiDate(d), ''];
+  sum.forEach(e => swEntries(e).forEach(([k, n]) => lines.push(`${e.name}${comboLabel(k) ? ' ' + comboLabel(k) : ''} x${n}`)));
   lines.push('', `รวม ${cups} แก้ว`);
   const notes = [];
-  people.forEach(p => { const o = curOrder(p.id, d); if(o && !o.skipped && o.note) notes.push(`- ${p.full_name}: ${o.menu_name}${o.sweetness ? ' ' + o.sweetness : ''} (${o.note})`); });
+  people.forEach(p => { const o = curOrder(p.id, d); if(o && !o.skipped && o.note) notes.push(`- ${p.full_name}: ${o.menu_name}${comboLabel(comboKey(o)) ? ' ' + comboLabel(comboKey(o)) : ''} (${o.note})`); });
   if(notes.length){ lines.push('', 'หมายเหตุ:'); lines.push(...notes); }
   return lines.join('\n');
 }
@@ -330,29 +395,60 @@ async function copySummary(){
   }
 }
 
+/* ===== พิมพ์สติกเกอร์แปะแก้ว ===== */
+function openStickerDialog(){
+  const n = cupsList(cur.order_date).length;
+  if(!n){ toast('ยังไม่มีแก้วให้พิมพ์'); return; }
+  const m = document.createElement('div'); m.className = 'modal'; m.id = 'stkModal'; m.onclick = e => { if(e.target === m) m.remove(); };
+  m.innerHTML = `<div class="box" style="max-width:420px"><h2>พิมพ์สติกเกอร์แปะแก้ว</h2>
+    <p class="muted">ทั้งหมด ${n} แก้ว · 1 แก้ว 1 ใบ แสดงชื่อ เมนู ร้อน/เย็น ความหวาน และหมายเหตุ · พิมพ์ลงกระดาษ A4 ธรรมดาแล้วตัดตามเส้นประ หรือพิมพ์ลงกระดาษสติกเกอร์</p>
+    <label class="f">จำนวนคอลัมน์ต่อหน้า</label><select id="stk_cols"><option value="2">2 คอลัมน์ (ใบใหญ่)</option><option value="3" selected>3 คอลัมน์</option><option value="4">4 คอลัมน์ (ใบเล็ก)</option></select>
+    <label class="f">เรียงตาม</label><select id="stk_sort"><option value="code">รหัสพนักงาน / ชื่อ (ช่วยตอนแจก)</option><option value="menu">เมนู (ช่วยตอนชง)</option></select>
+    <label class="row" style="margin-top:10px"><input type="checkbox" id="stk_und"> เฉพาะแก้วที่ยังไม่แจก</label>
+    <div class="row" style="margin-top:14px"><button class="btn green" onclick="printStickers()">🖨 พิมพ์</button><button class="btn ghost" onclick="$('stkModal').remove()">ยกเลิก</button></div></div>`;
+  document.body.appendChild(m);
+}
+function printStickers(){
+  const cols = parseInt($('stk_cols').value) || 3, sort = $('stk_sort').value, und = $('stk_und').checked;
+  let cups = cupsList(cur.order_date);
+  if(und) cups = cups.filter(c => !c.o.delivered);
+  if(!cups.length){ toast('ไม่มีแก้วที่ตรงเงื่อนไข'); return; }
+  if(sort === 'menu') cups.sort((a, b) => a.o.menu_name.localeCompare(b.o.menu_name, 'th') || comboRank(comboKey(a.o)) - comboRank(comboKey(b.o)) || people.indexOf(a.p) - people.indexOf(b.p));
+  let pa = $('printArea');
+  if(!pa){ pa = document.createElement('div'); pa.id = 'printArea'; document.body.appendChild(pa); }
+  pa.innerHTML = `<div class="stkgrid" style="grid-template-columns:repeat(${cols},1fr)">` + cups.map(({ p, o }) =>
+    `<div class="stk"><div class="n">${esc(p.full_name)}</div><div class="m">${esc(o.menu_name)}${o.temp ? ' · ' + esc(o.temp) : ''}</div>` +
+    (o.sweetness ? `<div class="s">${esc(o.sweetness)}</div>` : '') + (o.note ? `<div class="t">${esc(o.note)}</div>` : '') +
+    `<div class="g">${[p.emp_id, p.grp !== 'ผู้เข้าอบรม' ? p.grp : ''].filter(Boolean).map(esc).join(' · ')}</div></div>`).join('') + '</div>';
+  const mm = $('stkModal'); if(mm) mm.remove();
+  window.print();
+}
+window.addEventListener('afterprint', () => { const pa = $('printArea'); if(pa) pa.innerHTML = ''; });
+
 function exportExcel(){
-  const d = day, wb = XLSX.utils.book_new();
+  const d = cur.order_date, wb = XLSX.utils.book_new();
   const sum = summaryRows(d), cups = sum.reduce((s, e) => s + e.total, 0);
-  const a1 = [['เมนู', 'ระดับความหวาน', 'จำนวน (แก้ว)']];
-  sum.forEach(e => swEntries(e).forEach(([k, n]) => a1.push([e.name, k, n])));
-  a1.push(['รวมทั้งหมด', '', cups]);
+  const a1 = [['เมนู', 'ร้อน/เย็น', 'ระดับความหวาน', 'จำนวน (แก้ว)']];
+  sum.forEach(e => swEntries(e).forEach(([k, n]) => { const [t, s] = k.split('|'); a1.push([e.name, t, s, n]); }));
+  a1.push(['รวมทั้งหมด', '', '', cups]);
   XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(a1), 'สรุปเมนู');
 
-  const a2 = [['รหัสพนักงาน', 'ชื่อ-นามสกุล', 'กลุ่ม', 'สังกัด', 'สถานะ', 'เครื่องดื่ม', 'ความหวาน', 'หมายเหตุ', 'เวลา']];
+  const a2 = [['รหัสพนักงาน', 'ชื่อ-นามสกุล', 'กลุ่ม', 'สังกัด', 'สถานะ', 'เครื่องดื่ม', 'ร้อน/เย็น', 'ความหวาน', 'หมายเหตุ', 'เวลาสั่ง', 'แจกแล้ว']];
   people.forEach(p => {
     const o = curOrder(p.id, d);
     a2.push([p.emp_id || '', p.full_name, p.grp, p.unit, o ? (o.skipped ? 'ไม่รับ' : 'สั่งแล้ว') : 'ยังไม่สั่ง',
-      o && !o.skipped ? o.menu_name : '', o ? (o.sweetness || '') : '', o ? o.note : '', o ? fmtHM(o.created_at) : '']);
+      o && !o.skipped ? o.menu_name : '', o ? (o.temp || '') : '', o ? (o.sweetness || '') : '', o ? o.note : '', o ? fmtHM(o.created_at) : '',
+      o && !o.skipped ? (o.delivered ? 'แจกแล้ว' : 'ยังไม่แจก') : '']);
   });
   XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(a2), 'รายคน ' + d);
 
   const pmap = new Map(people.map(p => [p.id, p]));
-  const a3 = [['วันที่', 'รหัสพนักงาน', 'ชื่อ-นามสกุล', 'กลุ่ม', 'เครื่องดื่ม', 'ความหวาน', 'หมายเหตุ', 'ไม่รับ', 'ปลดล็อกแล้ว', 'เวลา']];
+  const a3 = [['วันที่', 'รหัสพนักงาน', 'ชื่อ-นามสกุล', 'กลุ่ม', 'เครื่องดื่ม', 'ร้อน/เย็น', 'ความหวาน', 'หมายเหตุ', 'ไม่รับ', 'แจกแล้ว', 'ปลดล็อกแล้ว', 'เวลา']];
   orders.slice().sort((a, b) => a.order_date.localeCompare(b.order_date) || a.created_at.localeCompare(b.created_at)).forEach(o => {
     const p = pmap.get(o.person_id) || {};
-    a3.push([o.order_date, p.emp_id || '', p.full_name || '', p.grp || '', o.skipped ? '' : o.menu_name, o.sweetness || '', o.note, o.skipped ? 'ใช่' : '', o.unlocked ? 'ใช่' : '', fmtT(o.created_at)]);
+    a3.push([o.order_date, p.emp_id || '', p.full_name || '', p.grp || '', o.skipped ? '' : o.menu_name, o.temp || '', o.sweetness || '', o.note, o.skipped ? 'ใช่' : '', o.delivered ? 'ใช่' : '', o.unlocked ? 'ใช่' : '', fmtT(o.created_at)]);
   });
-  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(a3), 'ทุกวัน');
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(a3), 'ประวัติทุกครั้ง');
   XLSX.writeFile(wb, `สั่งน้ำ_${cur.title}_${d}.xlsx`.replace(/[\\/:*?"<>|]/g, '_'));
 }
 
@@ -360,18 +456,18 @@ function exportExcel(){
 function peopleHtml(){
   const q = pSearch.trim().toLowerCase();
   const list = people.filter(p => !q || p.full_name.toLowerCase().includes(q) || (p.emp_id || '').toLowerCase().includes(q) || (p.grp || '').toLowerCase().includes(q));
-  const grps = [...new Set(['ผู้เข้าอบรม', 'เจ้าหน้าที่', 'วิทยากร', ...people.map(p => p.grp)])];
+  const grps = [...new Set([...GROUPS, ...people.map(p => p.grp)])];
   return `<div class="card"><h2>นำเข้ารายชื่อจากการสอบ</h2>
       <div class="row" style="flex-wrap:nowrap"><select id="imp_s"><option value="">— เลือกการสอบ —</option>` +
         examSessions.map(s => `<option value="${esc(s.id)}">${esc(s.title)}${s.batch ? ' (รุ่น ' + esc(s.batch) + ')' : ''}</option>`).join('') +
       `</select><button class="btn" onclick="importFromExam()" style="white-space:nowrap">⬇ นำเข้า</button></div>
       <p class="muted">คัดลอกผู้เข้าอบรมมาเป็นกลุ่ม "ผู้เข้าอบรม" · นำเข้าซ้ำได้ (เพิ่มเฉพาะคนที่ยังไม่มี ไม่ทับข้อมูลเดิม)</p></div>
-    <div class="card"><h2 id="pf_title">เพิ่มรายชื่อ (เจ้าหน้าที่ วิทยากร ฯลฯ)</h2>
+    <div class="card"><h2 id="pf_title">เพิ่มรายชื่อ (เจ้าหน้าที่ วิทยากร สังเกตการณ์ ฯลฯ)</h2>
       <div class="grid2" style="grid-template-columns:2fr 1fr 1fr 1fr auto;align-items:end">
         <div><label class="f">ชื่อ-นามสกุล *</label><input type="text" id="pf_name" onkeydown="if(event.key==='Enter')savePerson()"></div>
         <div><label class="f">รหัส (ถ้ามี)</label><input type="text" id="pf_id"></div>
         <div><label class="f">สังกัด</label><input type="text" id="pf_unit"></div>
-        <div><label class="f">กลุ่ม</label><input type="text" id="pf_grp" list="grplist" value="เจ้าหน้าที่"><datalist id="grplist">${grps.map(g => `<option value="${esc(g)}">`).join('')}</datalist></div>
+        <div><label class="f">กลุ่ม</label><select id="pf_grp">${grps.map(g => `<option value="${esc(g)}" ${g === 'เจ้าหน้าที่' ? 'selected' : ''}>${esc(g)}</option>`).join('')}</select></div>
         <div class="row" style="flex-wrap:nowrap"><button class="btn green" id="pf_btn" onclick="savePerson()" style="white-space:nowrap">เพิ่ม</button><button class="btn ghost hide" id="pf_cancel" onclick="cancelEditPerson()">ยกเลิก</button></div>
       </div></div>
     <div class="card"><div class="row" style="justify-content:space-between"><h2 style="margin:0">รายชื่อทั้งหมด ${people.length} คน</h2>
@@ -430,16 +526,25 @@ async function importFromExam(){
 }
 
 /* ===== ตั้งค่า / ลิงก์ ===== */
+function toBkkLocal(iso){ return iso ? new Date(iso).toLocaleString('sv-SE', { timeZone: 'Asia/Bangkok' }).replace(' ', 'T').slice(0, 16) : ''; }
+function fromBkkLocal(v){ return v ? new Date(v + ':00+07:00').toISOString() : null; }
 function studentLink(){ return location.href.split('?')[0].split('#')[0].replace(/[^\/]*$/, '') + 'drink-order.html?e=' + cur.id; }
 function settingsHtml(){
   const link = studentLink();
+  const stText = { OPEN: 'กำลังเปิดรับสั่ง', MANUAL: 'ปิดอยู่ (แอดมินกดปิด)', TIME: 'ปิดแล้ว (เลยเวลาปิดอัตโนมัติ)', EXPIRED: 'สิ้นสุดแล้ว (เลยวันที่ของรายการ)' }[evState(cur)];
   return `<div class="card"><h2>ลิงก์สั่งเครื่องดื่ม</h2>
       <div class="linkbox">${esc(link)}</div>
       <div class="row" style="margin-top:8px"><button class="btn" onclick="navigator.clipboard.writeText('${esc(link)}').then(()=>toast('คัดลอกลิงก์แล้ว'))">📋 คัดลอกลิงก์</button></div>
       <p style="margin-top:10px"><img alt="QR" width="180" height="180" src="https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=${encodeURIComponent(link)}"><br><span class="muted">QR (สร้างผ่าน qrserver.com — ต้องมีอินเทอร์เน็ต) · ไฟล์ drink-order.html ต้องอยู่โฟลเดอร์เดียวกับไฟล์นี้บนเว็บ</span></p></div>
     <div class="card"><h2>เปิด/ปิดรับสั่ง</h2>
-      <label class="row"><input type="checkbox" ${cur.is_open ? 'checked' : ''} onchange="setOpen(this.checked)"> เปิดรับสั่ง</label>
-      <p class="muted">ปิดแล้วผู้ใช้เปิดลิงก์จะเห็นข้อความ "ปิดรับการสั่งเครื่องดื่ม"</p></div>
+      <p>สถานะตอนนี้: ${stateTag(cur)} <span class="muted">${esc(stText)}</span></p>
+      <label class="row"><input type="checkbox" ${cur.is_open ? 'checked' : ''} onchange="setOpen(this.checked)"> เปิดรับสั่ง (แอดมินติ๊กออกเพื่อปิดเองได้ทุกเมื่อ)</label>
+      <label class="f">ปิดรับสั่งอัตโนมัติเมื่อ (เวลาไทย)</label>
+      <div class="row" style="flex-wrap:nowrap"><input type="datetime-local" id="s_close" value="${esc(toBkkLocal(cur.close_at))}"><button class="btn green" onclick="saveCloseAt()" style="white-space:nowrap">ตั้งเวลา</button><button class="btn ghost" onclick="clearCloseAt()" style="white-space:nowrap">ล้างเวลา</button></div>
+      <p class="muted">ไม่ตั้งเวลา = ปิดเมื่อแอดมินกดปิด หรือเมื่อพ้นสิ้นวันที่ของรายการ · ผู้ที่เปิดหน้าค้างไว้แล้วกดสั่งหลังหมดเวลา ระบบจะไม่รับ</p></div>
+    <div class="card"><h2>วันที่ของรายการ</h2>
+      <div class="row" style="flex-wrap:nowrap"><input type="date" id="s_date" value="${esc(cur.order_date)}"><button class="btn green" onclick="saveDate()" style="white-space:nowrap">บันทึกวันที่</button></div>
+      <p class="muted">ผู้ใช้สั่งล่วงหน้าได้ตลอดจนถึงสิ้นวันที่นี้ · ถ้าเปลี่ยนวันที่หลังมีคนสั่งแล้ว คำสั่งซื้อทั้งหมดจะย้ายตามไปด้วย</p></div>
     <div class="card"><h2>ชื่อรายการ</h2>
       <div class="row" style="flex-wrap:nowrap"><input type="text" id="s_title" value="${esc(cur.title)}"><button class="btn green" onclick="saveTitle()">บันทึก</button></div></div>
     <div class="card"><h2>โซนอันตราย</h2>
@@ -450,6 +555,35 @@ async function setOpen(v){
   if(error){ toast('ผิดพลาด: ' + error.message); return; }
   cur.is_open = v; toast('บันทึกแล้ว'); renderDetail();
 }
+async function saveCloseAt(){
+  const v = $('s_close').value;
+  if(!v){ toast('กรุณาเลือกวันและเวลา'); return; }
+  const { error } = await sb.from('drink_events').update({ close_at: fromBkkLocal(v) }).eq('id', cur.id);
+  if(error){ toast('ผิดพลาด: ' + error.message); return; }
+  cur.close_at = fromBkkLocal(v); toast('ตั้งเวลาปิดรับสั่งแล้ว'); renderDetail();
+}
+async function clearCloseAt(){
+  const { error } = await sb.from('drink_events').update({ close_at: null }).eq('id', cur.id);
+  if(error){ toast('ผิดพลาด: ' + error.message); return; }
+  cur.close_at = null; toast('ล้างเวลาปิดแล้ว'); renderDetail();
+}
+async function saveDate(){
+  const v = $('s_date').value;
+  if(!v){ toast('กรุณาเลือกวันที่'); return; }
+  if(v === cur.order_date){ toast('เป็นวันที่เดิมอยู่แล้ว'); return; }
+  const old = cur.order_date;
+  if(orders.length && !confirm(`เปลี่ยนวันที่เป็น ${thaiDate(v, 'medium')} ?\nคำสั่งซื้อที่มีอยู่ ${orders.length} รายการจะย้ายไปวันที่ใหม่ด้วย`)) return;
+  if(orders.length){
+    const r = await sb.from('drink_orders').update({ order_date: v }).eq('event_id', cur.id);
+    if(r.error){ toast('ย้ายคำสั่งซื้อไม่สำเร็จ ยังไม่เปลี่ยนวันที่: ' + r.error.message); return; }
+  }
+  const { error } = await sb.from('drink_events').update({ order_date: v }).eq('id', cur.id);
+  if(error){
+    if(orders.length) await sb.from('drink_orders').update({ order_date: old }).eq('event_id', cur.id);   // ย้อนกลับ
+    toast('ผิดพลาด: ' + error.message); return;
+  }
+  toast('เปลี่ยนวันที่แล้ว'); await loadAll(); renderDetail();
+}
 async function saveTitle(){
   const title = $('s_title').value.trim(); if(!title){ toast('ต้องมีชื่อรายการ'); return; }
   const { error } = await sb.from('drink_events').update({ title }).eq('id', cur.id);
@@ -457,7 +591,7 @@ async function saveTitle(){
   cur.title = title; toast('บันทึกแล้ว'); renderDetail();
 }
 async function clearOrders(){
-  if(!confirm('ล้างคำสั่งซื้อทุกวันของรายการนี้? ย้อนกลับไม่ได้')) return;
+  if(!confirm('ล้างคำสั่งซื้อทั้งหมดของรายการนี้? ย้อนกลับไม่ได้')) return;
   if(!confirm('ยืนยันอีกครั้ง: คำสั่งซื้อทั้งหมดจะหายถาวร')) return;
   const { error } = await sb.from('drink_orders').delete().eq('event_id', cur.id);
   if(error){ toast('ผิดพลาด: ' + error.message); return; }
@@ -469,7 +603,6 @@ async function deleteEvent(){
   if(error){ toast('ผิดพลาด: ' + error.message); return; }
   toast('ลบแล้ว'); await go('events');
 }
-
 /* ===== เมนูและความหวาน (ใช้ร่วมทุกรายการ) ===== */
 async function loadMenu(){
   const [m, s] = await Promise.all([
@@ -480,13 +613,15 @@ async function loadMenu(){
 async function viewMenuAdmin(){ await loadMenu(); renderMenuAdmin(); }
 function renderMenuAdmin(){
   $('view').innerHTML = `<div class="card"><h2>เมนูเครื่องดื่ม</h2>
-      <p class="muted">เมนูใช้ร่วมกันทุกรายการสั่งน้ำ · ปิด "เปิดให้สั่ง" เมื่อเมนูหมด/งดชั่วคราว · เมนูที่ปิด "มีความหวาน" (เช่น น้ำเปล่า) จะไม่ถามระดับความหวาน</p>
+      <p class="muted">เมนูใช้ร่วมกันทุกรายการสั่งน้ำ · ปิด "เปิดให้สั่ง" เมื่อเมนูหมด/งดชั่วคราว · เมนูที่ปิด "มีความหวาน" (เช่น น้ำเปล่า) จะไม่ถามระดับความหวาน · เมนูที่ติ๊ก "เลือกร้อน/เย็นได้" จะให้ผู้สั่งเลือกร้อนหรือเย็น</p>
       <div class="row" style="flex-wrap:nowrap;margin-bottom:10px"><input type="text" id="mn_name" placeholder="ชื่อเมนู เช่น ชาเย็น" onkeydown="if(event.key==='Enter')addMenu()">
         <label class="row" style="white-space:nowrap"><input type="checkbox" id="mn_sw" checked> มีความหวาน</label>
+        <label class="row" style="white-space:nowrap"><input type="checkbox" id="mn_tp"> เลือกร้อน/เย็นได้</label>
         <button class="btn green" onclick="addMenu()" style="white-space:nowrap">＋ เพิ่มเมนู</button></div>` +
-    (menu.length ? `<table><thead><tr><th>เมนู</th><th>มีความหวาน</th><th>เปิดให้สั่ง</th><th></th></tr></thead><tbody>` +
+    (menu.length ? `<table><thead><tr><th>เมนู</th><th>มีความหวาน</th><th>ร้อน/เย็น</th><th>เปิดให้สั่ง</th><th></th></tr></thead><tbody>` +
       menu.map((m, i) => `<tr><td>${editingMenu === m.id ? `<input type="text" id="mn_edit" value="${esc(m.name)}" onkeydown="if(event.key==='Enter')saveMenuName('${esc(m.id)}')">` : `<b>${esc(m.name)}</b>${m.active ? '' : ' <span class="tag gray">ซ่อนอยู่</span>'}`}</td>
         <td><input type="checkbox" ${m.has_sweetness ? 'checked' : ''} onchange="updMenu('${esc(m.id)}','has_sweetness',this.checked)"></td>
+        <td><input type="checkbox" ${m.has_temp ? 'checked' : ''} onchange="updMenu('${esc(m.id)}','has_temp',this.checked)"></td>
         <td><input type="checkbox" ${m.active ? 'checked' : ''} onchange="updMenu('${esc(m.id)}','active',this.checked)"></td>
         <td class="row"><button class="btn ghost sm" ${i === 0 ? 'disabled' : ''} onclick="moveItem('drink_menu',menu,${i},-1)">↑</button><button class="btn ghost sm" ${i === menu.length - 1 ? 'disabled' : ''} onclick="moveItem('drink_menu',menu,${i},1)">↓</button>
           ${editingMenu === m.id ? `<button class="btn green sm" onclick="saveMenuName('${esc(m.id)}')">บันทึก</button><button class="btn ghost sm" onclick="editingMenu=null;renderMenuAdmin()">ยกเลิก</button>`
@@ -508,7 +643,7 @@ function renderMenuAdmin(){
 }
 async function addMenu(){
   const name = $('mn_name').value.trim(); if(!name){ toast('กรุณาใส่ชื่อเมนู'); return; }
-  const { error } = await sb.from('drink_menu').insert({ name, has_sweetness: $('mn_sw').checked, sort: menu.length + 1 });
+  const { error } = await sb.from('drink_menu').insert({ name, has_sweetness: $('mn_sw').checked, has_temp: $('mn_tp').checked, sort: menu.length + 1 });
   if(error){ toast('ผิดพลาด: ' + error.message); return; }
   await loadMenu(); renderMenuAdmin();
 }
